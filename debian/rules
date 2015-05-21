@@ -1,0 +1,13 @@
+#!/usr/bin/make -f
+DPKG_EXPORT_BUILDFLAGS = 1
+include /usr/share/dpkg/default.mk
+
+export PYBUILD_NAME=etcd
+export PYBUILD_DISABLE=test
+
+%:
+	dh $@ --with python2,python3,sphinxdoc --buildsystem=pybuild
+
+override_dh_auto_build:
+	dh_auto_build
+	PYTHONPATH=. http_proxy='127.0.0.1:9' sphinx-build -N -bhtml docs-source/ .pybuild/docs/html

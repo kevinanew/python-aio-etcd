@@ -1,0 +1,41 @@
+Source: python-etcd
+Section: python
+Priority: optional
+Maintainer: Filippo Giunchedi <filippo@wikimedia.org>
+Standards-Version: 3.9.6
+Build-Depends: debhelper (>= 9), dh-python,
+  python-all (>= 2.7), python-setuptools,
+  python3-all, python3-setuptools,
+  python-docutils, python-sphinx (>= 1.0.7+dfsg-1~),
+  python-urllib3, python-openssl
+Homepage: https://github.com/jplana/python-etcd
+X-Python-Version: >= 2.7
+X-Python3-Version: >= 3.3
+
+Package: python-etcd
+Architecture: any
+Depends: ${python:Depends}, ${shlibs:Depends}, ${misc:Depends}
+Breaks: ${python:Breaks}
+Suggests: etcd, python-etcd-doc
+Provides: ${python:Provides}
+Description: client for etcd distributed, consistent key/value store - python 2.x
+ python-etcd provides a client for etcd: a distributed, consistent key value
+ store for shared configuration and service discovery.
+
+Package: python3-etcd
+Architecture: any
+Depends: ${python3:Depends}, ${shlibs:Depends}, ${misc:Depends}
+Breaks: ${python3:Breaks}
+Suggests: etcd, python-etcd-doc
+Provides: ${python3:Provides}
+Description: client for etcd distributed, consistent key/value store - python 3.x
+ python-etcd provides a client for etcd: a distributed, consistent key value
+ store for shared configuration and service discovery.
+
+Package: python-etcd-doc
+Architecture: all
+Section: doc
+Depends: ${sphinxdoc:Depends}, ${misc:Depends}
+Description: client for etcd distributed, consistent key/value store - documentation
+ python-etcd provides a client for etcd: a distributed, consistent key value
+ store for shared configuration and service discovery.
