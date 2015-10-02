@@ -18,6 +18,7 @@ import urllib3
 import urllib3.util
 import json
 import ssl
+import dns.resolver
 import etcd
 
 try:
@@ -46,6 +47,7 @@ class Client(object):
             self,
             host='127.0.0.1',
             port=4001,
+            srv_domain=None,
             version_prefix='/v2',
             read_timeout=60,
             allow_redirect=True,
@@ -66,6 +68,8 @@ class Client(object):
                            If a tuple ((host, port), (host, port), ...)
 
             port (int):  Port used to connect to etcd.
+
+            srv_domain (str): Domain to search the SRV record for cluster autodiscovery.
 
             version_prefix (str): Url or version prefix in etcd url (default=/v2).
 
@@ -98,8 +102,15 @@ class Client(object):
                                       by host. By default this will use up to 10
                                       connections.
         """
-        _log.debug("New etcd client created for %s:%s%s",
-                  host, port, version_prefix)
+
+        # If a DNS record is provided, use it to get the hosts list
+        if srv_domain is not None:
+            try:
+                host = self._discover(srv_domain)
+            except Exception as e:
+                _log.error("Could not discover the etcd hosts from %s: %s",
+                           srv_domain, e)
+
         self._protocol = protocol
 
         def uri(protocol, host, port):
@@ -153,6 +164,8 @@ class Client(object):
 
         self.http = urllib3.PoolManager(num_pools=10, **kw)
 
+        _log.debug("New etcd client created for %s", self.base_uri)
+
         if self._allow_reconnect:
             # we need the set of servers in the cluster in order to try
             # reconnecting upon error. The cluster members will be
@@ -173,6 +186,18 @@ class Client(object):
                 self._machines_cache.remove(self._base_uri)
             _log.debug("Machines cache initialised to %s",
                        self._machines_cache)
+
+    def _discover(self, domain):
+        srv_name = "_etcd._tcp.{}".format(domain)
+        answers = dns.resolver.query(srv_name, 'SRV')
+        hosts = []
+        for answer in answers:
+            hosts.append(
+                (answer.target.to_text(omit_final_dot=True), answer.port))
+        _log.debug("Found %s", hosts)
+        if not len(hosts):
+            raise ValueError("The SRV record is present but no host were found")
+        return tuple(hosts)
 
     @property
     def base_uri(self):
@@ -688,8 +713,13 @@ class Client(object):
 
     def _result_from_response(self, response):
         """ Creates an EtcdResult from json dictionary """
+        raw_response = response.data
         try:
-            res = json.loads(response.data.decode('utf-8'))
+            res = json.loads(raw_response.decode('utf-8'))
+        except (TypeError, ValueError, UnicodeError) as e:
+            raise etcd.EtcdException(
+                'Server response was not valid JSON: %r' % e)
+        try:
             r = etcd.EtcdResult(**res)
             if response.status == 201:
                 r.newKey = True
@@ -697,9 +727,9 @@ class Client(object):
             return r
         except Exception as e:
             raise etcd.EtcdException(
-                'Unable to decode server response: %s' % e)
+                'Unable to decode server response: %r' % e)
 
-    def _next_server(self):
+    def _next_server(self, cause=None):
         """ Selects the next server in the list, refreshes the server list. """
         _log.debug("Selection next machine in cache. Available machines: %s",
                    self._machines_cache)
@@ -707,7 +737,8 @@ class Client(object):
             mach = self._machines_cache.pop()
         except IndexError:
             _log.error("Machines cache is empty, no machines to try.")
-            raise etcd.EtcdConnectionFailed('No more machines in the cluster')
+            raise etcd.EtcdConnectionFailed('No more machines in the cluster',
+                                            cause=cause)
         else:
             _log.info("Selected new etcd server %s", mach)
             return mach
@@ -752,7 +783,15 @@ class Client(object):
                 else:
                     raise etcd.EtcdException(
                         'HTTP method {} not supported'.format(method))
-
+                
+                # Check the cluster ID hasn't changed under us.  We use
+                # preload_content=False above so we can read the headers
+                # before we wait for the content of a watch.
+                self._check_cluster_id(response)
+                # Now force the data to be preloaded in order to trigger any
+                # IO-related errors in this method rather than when we try to
+                # access it later.
+                _ = response.data
             # urllib3 doesn't wrap all httplib exceptions and earlier versions
             # don't wrap socket errors either.
             except (urllib3.exceptions.HTTPError,
@@ -765,41 +804,42 @@ class Client(object):
                               "server.")
                     # _next_server() raises EtcdException if there are no
                     # machines left to try, breaking out of the loop.
-                    self._base_uri = self._next_server()
+                    self._base_uri = self._next_server(cause=e)
                     some_request_failed = True
                 else:
                     _log.debug("Reconnection disabled, giving up.")
                     raise etcd.EtcdConnectionFailed(
-                        "Connection to etcd failed due to %r" % e)
+                        "Connection to etcd failed due to %r" % e,
+                        cause=e
+                    )
             except:
                 _log.exception("Unexpected request failure, re-raising.")
                 raise
-
-            else:
-                # Check the cluster ID hasn't changed under us.  We use
-                # preload_content=False above so we can read the headers
-                # before we wait for the content of a long poll.
-                cluster_id = response.getheader("x-etcd-cluster-id")
-                id_changed = (self.expected_cluster_id
-                              and cluster_id is not None and
-                              cluster_id != self.expected_cluster_id)
-                # Update the ID so we only raise the exception once.
-                old_expected_cluster_id = self.expected_cluster_id
-                self.expected_cluster_id = cluster_id
-                if id_changed:
-                    # Defensive: clear the pool so that we connect afresh next
-                    # time.
-                    self.http.clear()
-                    raise etcd.EtcdClusterIdChanged(
-                        'The UUID of the cluster changed from {} to '
-                        '{}.'.format(old_expected_cluster_id, cluster_id))
-
+            
         if some_request_failed:
             if not self._use_proxies:
                 # The cluster may have changed since last invocation
                 self._machines_cache = self.machines
             self._machines_cache.remove(self._base_uri)
         return self._handle_server_response(response)
+
+    def _check_cluster_id(self, response):
+        cluster_id = response.getheader("x-etcd-cluster-id")
+        if not cluster_id:
+            _log.warning("etcd response did not contain a cluster ID")
+            return
+        id_changed = (self.expected_cluster_id and
+                      cluster_id != self.expected_cluster_id)
+        # Update the ID so we only raise the exception once.
+        old_expected_cluster_id = self.expected_cluster_id
+        self.expected_cluster_id = cluster_id
+        if id_changed:
+            # Defensive: clear the pool so that we connect afresh next
+            # time.
+            self.http.clear()
+            raise etcd.EtcdClusterIdChanged(
+                'The UUID of the cluster changed from {} to '
+                '{}.'.format(old_expected_cluster_id, cluster_id))
 
     def _handle_server_response(self, response):
         """ Handles the server response """

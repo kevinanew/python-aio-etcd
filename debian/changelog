@@ -1,3 +1,9 @@
+python-etcd (0.4.1+git1-a71a561-1) unstable; urgency=medium
+
+  * Merge srv_record branch
+
+ -- Matthias Urlichs <matthias@urlichs.de>  Fri, 02 Oct 2015 05:28:34 +0200
+
 python-etcd (0.4.1-1) unstable; urgency=medium
 
   * Merge with Upstream.

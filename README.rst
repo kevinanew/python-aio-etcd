@@ -41,6 +41,8 @@ Create a client object
     client = etcd.Client(port=4002)
     client = etcd.Client(host='127.0.0.1', port=4003)
     client = etcd.Client(host='127.0.0.1', port=4003, allow_redirect=False) # wont let you run sensitive commands on non-leader machines, default is true
+    # If you have defined a SRV record for _etcd._tcp.example.com pointing to the clients
+    client = etcd.Client(srv_domain='example.com', protocol="https")
     # create a client against https://api.example.com:443/etcd
     client = etcd.Client(host='api.example.com', protocol='https', port=443, version_prefix='/etcd')
 Write a key
@@ -120,7 +122,7 @@ Locking module
 
     # The lock object may also be used as a context manager:
     client = etcd.Client()
-    with etcd.Lock('customer1') as my_lock:
+    with etcd.Lock(client, 'customer1') as my_lock:
         do_stuff()
         my_lock.is_acquired()  # True
         my_lock.acquire(lock_ttl = 60)

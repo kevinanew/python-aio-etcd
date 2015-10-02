@@ -8,8 +8,15 @@ NEWS = open(os.path.join(here, 'NEWS.txt')).read()
 
 version = '0.4.1'
 
+# Dnspython is two different packages depending on python version
+if sys.version_info.major == 2:
+    dns = 'dnspython'
+else:
+    dns = 'dnspython3'
+
 install_requires = [
-    'urllib3>=1.7'
+    'urllib3>=1.7',
+    dns
 ]
 
 test_requires = [
@@ -18,7 +25,8 @@ test_requires = [
     'pyOpenSSL>=0.14'
 ]
 
-setup(name='python-etcd',
+setup(
+    name='python-etcd',
     version=version,
     description="A python client for etcd",
     long_description=README + '\n\n' + NEWS,
@@ -42,5 +50,4 @@ setup(name='python-etcd',
     install_requires=install_requires,
     tests_require=test_requires,
     test_suite='nose.collector',
-
 )
