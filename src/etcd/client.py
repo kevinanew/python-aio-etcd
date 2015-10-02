@@ -55,6 +55,7 @@ class Client(object):
             allow_reconnect=False,
             use_proxies=False,
             expected_cluster_id=None,
+            per_host_pool_size=10
     ):
         """
         Initialize the client.
@@ -71,7 +72,7 @@ class Client(object):
             read_timeout (int):  max seconds to wait for a read.
 
             allow_redirect (bool): allow the client to connect to other nodes.
-+
+
             protocol (str):  Protocol used to connect to etcd.
 
             cert (mixed):   If a string, the whole ssl client certificate;
@@ -93,8 +94,11 @@ class Client(object):
                                        reads will raise EtcdClusterIdChanged
                                        if they receive a response with a
                                        different cluster ID.
+            per_host_pool_size (int): specifies maximum number of connections to pool
+                                      by host. By default this will use up to 10
+                                      connections.
         """
-        _log.info("New etcd client created for %s:%s%s",
+        _log.debug("New etcd client created for %s:%s%s",
                   host, port, version_prefix)
         self._protocol = protocol
 
@@ -121,7 +125,9 @@ class Client(object):
 
         # SSL Client certificate support
 
-        kw = {}
+        kw = {
+          'maxsize': per_host_pool_size
+        }
 
         if self._read_timeout > 0:
             kw['timeout'] = self._read_timeout
@@ -132,18 +138,18 @@ class Client(object):
             _log.debug("HTTPS enabled.")
             kw['ssl_version'] = ssl.PROTOCOL_TLSv1
 
-            if cert:
-                if isinstance(cert, tuple):
-                    # Key and cert are separate
-                    kw['cert_file'] = cert[0]
-                    kw['key_file'] = cert[1]
-                else:
-                    # combined certificate
-                    kw['cert_file'] = cert
+        if cert:
+            if isinstance(cert, tuple):
+                # Key and cert are separate
+                kw['cert_file'] = cert[0]
+                kw['key_file'] = cert[1]
+            else:
+                # combined certificate
+                kw['cert_file'] = cert
 
-            if ca_cert:
-                kw['ca_certs'] = ca_cert
-                kw['cert_reqs'] = ssl.CERT_REQUIRED
+        if ca_cert:
+            kw['ca_certs'] = ca_cert
+            kw['cert_reqs'] = ssl.CERT_REQUIRED
 
         self.http = urllib3.PoolManager(num_pools=10, **kw)
 
@@ -368,7 +374,7 @@ class Client(object):
         'newValue'
 
         """
-        _log.info("Writing %s to key %s ttl=%s dir=%s append=%s",
+        _log.debug("Writing %s to key %s ttl=%s dir=%s append=%s",
                   value, key, ttl, dir, append)
         key = self._sanitize_key(key)
         params = {}
@@ -413,7 +419,7 @@ class Client(object):
             obj (etcd.EtcdResult):  The object that needs updating.
 
         """
-        _log.info("Updating %s to %s.", obj.key, obj.value)
+        _log.debug("Updating %s to %s.", obj.key, obj.value)
         kwdargs = {
             'dir': obj.dir,
             'ttl': obj.ttl,
@@ -457,7 +463,7 @@ class Client(object):
         'value'
 
         """
-        _log.info("Issuing read for key %s with args %s", key, kwdargs)
+        _log.debug("Issuing read for key %s with args %s", key, kwdargs)
         key = self._sanitize_key(key)
 
         params = {}
@@ -504,7 +510,7 @@ class Client(object):
         '/key'
 
         """
-        _log.info("Deleting %s recursive=%s dir=%s extra args=%s",
+        _log.debug("Deleting %s recursive=%s dir=%s extra args=%s",
                    key, recursive, dir, kwdargs)
         key = self._sanitize_key(key)
 
@@ -762,7 +768,7 @@ class Client(object):
                     self._base_uri = self._next_server()
                     some_request_failed = True
                 else:
-                    _log.info("Reconnection disabled, giving up.")
+                    _log.debug("Reconnection disabled, giving up.")
                     raise etcd.EtcdConnectionFailed(
                         "Connection to etcd failed due to %r" % e)
             except:
@@ -774,9 +780,11 @@ class Client(object):
                 # preload_content=False above so we can read the headers
                 # before we wait for the content of a long poll.
                 cluster_id = response.getheader("x-etcd-cluster-id")
-                id_changed = (self.expected_cluster_id and
+                id_changed = (self.expected_cluster_id
+                              and cluster_id is not None and
                               cluster_id != self.expected_cluster_id)
                 # Update the ID so we only raise the exception once.
+                old_expected_cluster_id = self.expected_cluster_id
                 self.expected_cluster_id = cluster_id
                 if id_changed:
                     # Defensive: clear the pool so that we connect afresh next
@@ -784,7 +792,7 @@ class Client(object):
                     self.http.clear()
                     raise etcd.EtcdClusterIdChanged(
                         'The UUID of the cluster changed from {} to '
-                        '{}.'.format(self.expected_cluster_id, cluster_id))
+                        '{}.'.format(old_expected_cluster_id, cluster_id))
 
         if some_request_failed:
             if not self._use_proxies:
