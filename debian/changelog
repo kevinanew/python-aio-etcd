@@ -1,4 +1,4 @@
-python-etcd (0.4.0~git20150609+ac25bd7ba2) UNRELEASED; urgency=medium
+python-etcd (0.4.0~git20150609+ac25bd7-1) UNRELEASED; urgency=medium
 
   * Sync with the latest upstream version
 
