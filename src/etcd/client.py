@@ -6,11 +6,27 @@
 
 
 """
+import logging
+try:
+    # Python 3
+    from http.client import HTTPException
+except ImportError:
+    # Python 2
+    from httplib import HTTPException
+import socket
 import urllib3
+import urllib3.util
 import json
 import ssl
-
 import etcd
+
+try:
+    from urlparse import urlparse
+except ImportError:
+    from urllib.parse import urlparse
+
+
+_log = logging.getLogger(__name__)
 
 
 class Client(object):
@@ -24,7 +40,7 @@ class Client(object):
     _MPOST = 'POST'
     _MDELETE = 'DELETE'
     _comparison_conditions = set(('prevValue', 'prevIndex', 'prevExist'))
-    _read_options = set(('recursive', 'wait', 'waitIndex', 'sorted', 'consistent'))
+    _read_options = set(('recursive', 'wait', 'waitIndex', 'sorted', 'quorum'))
     _del_conditions = set(('prevValue', 'prevIndex'))
     def __init__(
             self,
@@ -37,6 +53,8 @@ class Client(object):
             cert=None,
             ca_cert=None,
             allow_reconnect=False,
+            use_proxies=False,
+            expected_cluster_id=None,
     ):
         """
         Initialize the client.
@@ -66,28 +84,39 @@ class Client(object):
                                     etcd server in the cluster in the case the
                                     default one does not respond.
 
-        """
-        self._machines_cache = []
+            use_proxies (bool): we are using a list of proxies to which we connect,
+                                 and don't want to connect to the original etcd cluster.
 
+            expected_cluster_id (str): If a string, recorded as the expected
+                                       UUID of the cluster (rather than
+                                       learning it from the first request),
+                                       reads will raise EtcdClusterIdChanged
+                                       if they receive a response with a
+                                       different cluster ID.
+        """
+        _log.info("New etcd client created for %s:%s%s",
+                  host, port, version_prefix)
         self._protocol = protocol
 
         def uri(protocol, host, port):
             return '%s://%s:%d' % (protocol, host, port)
 
         if not isinstance(host, tuple):
-            self._host = host
-            self._port = port
+            self._machines_cache = []
+            self._base_uri = uri(self._protocol, host, port)
         else:
-            self._host, self._port = host[0]
-            self._machines_cache.extend(
-                [uri(self._protocol, *conn) for conn in host])
+            if not allow_reconnect:
+                _log.error("List of hosts incompatible with allow_reconnect.")
+                raise etcd.EtcdException("A list of hosts to connect to was given, but reconnection not allowed?")
+            self._machines_cache = [uri(self._protocol, *conn) for conn in host]
+            self._base_uri = self._machines_cache.pop(0)
 
-        self._base_uri = uri(self._protocol, self._host, self._port)
-
+        self.expected_cluster_id = expected_cluster_id
         self.version_prefix = version_prefix
 
         self._read_timeout = read_timeout
         self._allow_redirect = allow_redirect
+        self._use_proxies = use_proxies
         self._allow_reconnect = allow_reconnect
 
         # SSL Client certificate support
@@ -100,6 +129,7 @@ class Client(object):
         if protocol == 'https':
             # If we don't allow TLSv1, clients using older version of OpenSSL
             # (<1.0) won't be able to connect.
+            _log.debug("HTTPS enabled.")
             kw['ssl_version'] = ssl.PROTOCOL_TLSv1
 
             if cert:
@@ -119,11 +149,24 @@ class Client(object):
 
         if self._allow_reconnect:
             # we need the set of servers in the cluster in order to try
-            # reconnecting upon error.
-            self._machines_cache = self.machines
-            self._machines_cache.remove(self._base_uri)
-        else:
-            self._machines_cache = []
+            # reconnecting upon error. The cluster members will be
+            # added to the hosts list you provided. If you are using
+            # proxies, set all
+            #
+            # Beware though: if you input '127.0.0.1' as your host and
+            # etcd advertises 'localhost', both will be in the
+            # resulting list.
+
+            # If we're connecting to the original cluster, we can
+            # extend the list given to the client with what we get
+            # from self.machines
+            if not self._use_proxies:
+                self._machines_cache = list(set(self._machines_cache) |
+                                            set(self.machines))
+            if self._base_uri in self._machines_cache:
+                self._machines_cache.remove(self._base_uri)
+            _log.debug("Machines cache initialised to %s",
+                       self._machines_cache)
 
     @property
     def base_uri(self):
@@ -133,12 +176,12 @@ class Client(object):
     @property
     def host(self):
         """Node to connect  etcd."""
-        return self._host
+        return urlparse(self._base_uri).netloc.split(':')[0]
 
     @property
     def port(self):
         """Port to connect etcd."""
-        return self._port
+        return int(urlparse(self._base_uri).netloc.split(':')[1])
 
     @property
     def protocol(self):
@@ -166,24 +209,107 @@ class Client(object):
         >>> print client.machines
         ['http://127.0.0.1:4001', 'http://127.0.0.1:4002']
         """
-        return [
-            node.strip() for node in self.api_execute(
-                self.version_prefix + '/machines',
-                self._MGET).data.decode('utf-8').split(',')
-        ]
+        # We can't use api_execute here, or it causes a logical loop
+        try:
+            uri = self._base_uri + self.version_prefix + '/machines'
+            response = self.http.request(
+                self._MGET,
+                uri,
+                timeout=self.read_timeout,
+                redirect=self.allow_redirect)
+
+            machines = [
+                node.strip() for node in
+                self._handle_server_response(response).data.decode('utf-8').split(',')
+            ]
+            _log.debug("Retrieved list of machines: %s", machines)
+            return machines
+        except (urllib3.exceptions.HTTPError,
+                HTTPException,
+                socket.error) as e:
+            # We can't get the list of machines, if one server is in the
+            # machines cache, try on it
+            _log.error("Failed to get list of machines from %s%s: %r",
+                       self._base_uri, self.version_prefix, e)
+            if self._machines_cache:
+                self._base_uri = self._machines_cache.pop(0)
+                _log.info("Retrying on %s", self._base_uri)
+                # Call myself
+                return self.machines
+            else:
+                raise etcd.EtcdException("Could not get the list of servers, "
+                                         "maybe you provided the wrong "
+                                         "host(s) to connect to?")
+
+    @property
+    def members(self):
+        """
+        A more structured view of peers in the cluster.
+
+        Note that while we have an internal DS called _members, accessing the public property will call etcd.
+        """
+        # Empty the members list
+        self._members = {}
+        try:
+            data = self.api_execute(self.version_prefix + '/members',
+                                    self._MGET).data.decode('utf-8')
+            res = json.loads(data)
+            for member in res['members']:
+                self._members[member['id']] = member
+            return self._members
+        except:
+            raise etcd.EtcdException("Could not get the members list, maybe the cluster has gone away?")
 
     @property
     def leader(self):
         """
         Returns:
-            str. the leader of the cluster.
+            dict. the leader of the cluster.
 
         >>> print client.leader
-        'http://127.0.0.1:4001'
+        {"id":"ce2a822cea30bfca","name":"default","peerURLs":["http://localhost:2380","http://localhost:7001"],"clientURLs":["http://127.0.0.1:4001"]}
         """
-        return self.api_execute(
-            self.version_prefix + '/leader',
-            self._MGET).data.decode('ascii')
+        try:
+
+            leader = json.loads(
+                self.api_execute(self.version_prefix + '/stats/leader',
+                                 self._MGET).data.decode('utf-8'))
+            return self.members[leader['leader']]
+        except Exception as e:
+            raise etcd.EtcdException("Cannot get leader data: %s" % e)
+
+    @property
+    def stats(self):
+        """
+        Returns:
+            dict. the stats of the local server
+        """
+        return self._stats()
+
+    @property
+    def leader_stats(self):
+        """
+        Returns:
+            dict. the stats of the leader
+        """
+        return self._stats('leader')
+
+    @property
+    def store_stats(self):
+        """
+        Returns:
+           dict. the stats of the kv store
+        """
+        return self._stats('store')
+
+    def _stats(self, what='self'):
+        """ Internal method to access the stats endpoints"""
+        data = self.api_execute(self.version_prefix
+                                + '/stats/' + what, self._MGET).data.decode('utf-8')
+        try:
+            return json.loads(data)
+        except (TypeError,ValueError):
+            raise etcd.EtcdException("Cannot parse json data in the response")
 
     @property
     def key_endpoint(self):
@@ -242,12 +368,14 @@ class Client(object):
         'newValue'
 
         """
+        _log.info("Writing %s to key %s ttl=%s dir=%s append=%s",
+                  value, key, ttl, dir, append)
         key = self._sanitize_key(key)
         params = {}
         if value is not None:
             params['value'] = value
 
-        if ttl:
+        if ttl is not None:
             params['ttl'] = ttl
 
         if dir:
@@ -285,6 +413,7 @@ class Client(object):
             obj (etcd.EtcdResult):  The object that needs updating.
 
         """
+        _log.info("Updating %s to %s.", obj.key, obj.value)
         kwdargs = {
             'dir': obj.dir,
             'ttl': obj.ttl,
@@ -294,10 +423,7 @@ class Client(object):
         if not obj.dir:
             # prevIndex on a dir causes a 'not a file' error. d'oh!
             kwdargs['prevIndex'] = obj.modifiedIndex
-
         return self.write(obj.key, obj.value, **kwdargs)
-
-
 
     def read(self, key, **kwdargs):
         """
@@ -331,6 +457,7 @@ class Client(object):
         'value'
 
         """
+        _log.info("Issuing read for key %s with args %s", key, kwdargs)
         key = self._sanitize_key(key)
 
         params = {}
@@ -338,13 +465,15 @@ class Client(object):
             if k in self._read_options:
                 if type(v) == bool:
                     params[k] = v and "true" or "false"
-                else:
+                elif v is not None:
                     params[k] = v
 
         timeout = kwdargs.get('timeout', None)
 
         response = self.api_execute(
-            self.key_endpoint + key, self._MGET, params=params, timeout=timeout)
+            self.key_endpoint + key, self._MGET, params=params,
+            timeout=timeout)
+        print response
         return self._result_from_response(response)
 
     def delete(self, key, recursive=None, dir=None, **kwdargs):
@@ -376,6 +505,8 @@ class Client(object):
         '/key'
 
         """
+        _log.info("Deleting %s recursive=%s dir=%s extra args=%s",
+                   key, recursive, dir, kwdargs)
         key = self._sanitize_key(key)
 
         kwds = {}
@@ -387,6 +518,7 @@ class Client(object):
         for k in self._del_conditions:
             if k in kwdargs:
                 kwds[k] = kwdargs[k]
+        _log.debug("Calculated params = %s", kwds)
 
         response = self.api_execute(
             self.key_endpoint + key, self._MDELETE, params=kwds)
@@ -478,6 +610,7 @@ class Client(object):
         'value'
 
         """
+        _log.debug("About to wait on key %s, index %s", key, index)
         if index:
             return self.read(key, wait=True, waitIndex=index, timeout=timeout,
                              recursive=recursive)
@@ -485,7 +618,7 @@ class Client(object):
             return self.read(key, wait=True, timeout=timeout,
                              recursive=recursive)
 
-    def eternal_watch(self, key, index=None):
+    def eternal_watch(self, key, index=None, recursive=None):
         """
         Generator that will yield changes from a key.
         Note that this method will block forever until an event is generated.
@@ -506,17 +639,16 @@ class Client(object):
         """
         local_index = index
         while True:
-            response = self.watch(key, index=local_index, timeout=0)
-            if local_index is not None:
-                local_index += 1
+            response = self.watch(key, index=local_index, timeout=0, recursive=recursive)
+            local_index = response.modifiedIndex + 1
             yield response
 
     def get_lock(self, *args, **kwargs):
-        return etcd.Lock(self, *args, **kwargs)
+        raise NotImplementedError('Lock primitives were removed from etcd 2.0')
 
     @property
     def election(self):
-        return etcd.LeaderElection(self)
+        raise NotImplementedError('Election primitives were removed from etcd 2.0')
 
     def _result_from_response(self, response):
         """ Creates an EtcdResult from json dictionary """
@@ -533,10 +665,16 @@ class Client(object):
 
     def _next_server(self):
         """ Selects the next server in the list, refreshes the server list. """
+        _log.debug("Selection next machine in cache. Available machines: %s",
+                   self._machines_cache)
         try:
-            return self._machines_cache.pop()
+            mach = self._machines_cache.pop()
         except IndexError:
-            raise etcd.EtcdException('No more machines in the cluster')
+            _log.error("Machines cache is empty, no machines to try.")
+            raise etcd.EtcdConnectionFailed('No more machines in the cluster')
+        else:
+            _log.info("Selected new etcd server %s", mach)
+            return mach
 
     def api_execute(self, path, method, params=None, timeout=None):
         """ Executes the query. """
@@ -563,7 +701,8 @@ class Client(object):
                         url,
                         timeout=timeout,
                         fields=params,
-                        redirect=self.allow_redirect)
+                        redirect=self.allow_redirect,
+                        preload_content=False)
 
                 elif (method == self._MPUT) or (method == self._MPOST):
                     response = self.http.request_encode_body(
@@ -572,17 +711,55 @@ class Client(object):
                         fields=params,
                         timeout=timeout,
                         encode_multipart=False,
-                        redirect=self.allow_redirect)
+                        redirect=self.allow_redirect,
+                        preload_content=False)
                 else:
                     raise etcd.EtcdException(
                         'HTTP method {} not supported'.format(method))
 
-            except urllib3.exceptions.MaxRetryError:
-                self._base_uri = self._next_server()
-                some_request_failed = True
+            # urllib3 doesn't wrap all httplib exceptions and earlier versions
+            # don't wrap socket errors either.
+            except (urllib3.exceptions.HTTPError,
+                    HTTPException,
+                    socket.error) as e:
+                _log.error("Request to server %s failed: %r",
+                           self._base_uri, e)
+                if self._allow_reconnect:
+                    _log.info("Reconnection allowed, looking for another "
+                              "server.")
+                    # _next_server() raises EtcdException if there are no
+                    # machines left to try, breaking out of the loop.
+                    self._base_uri = self._next_server()
+                    some_request_failed = True
+                else:
+                    _log.info("Reconnection disabled, giving up.")
+                    raise etcd.EtcdConnectionFailed(
+                        "Connection to etcd failed due to %r" % e)
+            except:
+                _log.exception("Unexpected request failure, re-raising.")
+                raise
+
+            else:
+                # Check the cluster ID hasn't changed under us.  We use
+                # preload_content=False above so we can read the headers
+                # before we wait for the content of a long poll.
+                cluster_id = response.getheader("x-etcd-cluster-id")
+                id_changed = (self.expected_cluster_id and
+                              cluster_id != self.expected_cluster_id)
+                # Update the ID so we only raise the exception once.
+                self.expected_cluster_id = cluster_id
+                if id_changed:
+                    # Defensive: clear the pool so that we connect afresh next
+                    # time.
+                    self.http.clear()
+                    raise etcd.EtcdClusterIdChanged(
+                        'The UUID of the cluster changed from {} to '
+                        '{}.'.format(self.expected_cluster_id, cluster_id))
 
         if some_request_failed:
-            self._machines_cache = self.machines
+            if not self._use_proxies:
+                # The cluster may have changed since last invocation
+                self._machines_cache = self.machines
             self._machines_cache.remove(self._base_uri)
         return self._handle_server_response(response)
 
@@ -597,9 +774,8 @@ class Client(object):
             # throw the appropriate exception
             try:
                 r = json.loads(resp)
-            except ValueError:
-                r = None
-            if r:
-                etcd.EtcdError.handle(**r)
-            else:
-                raise etcd.EtcdException(resp)
+            except (TypeError, ValueError):
+                # Bad JSON, make a response locally.
+                r = {"message": "Bad response",
+                     "cause": str(resp)}
+            etcd.EtcdError.handle(r)

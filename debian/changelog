@@ -1,3 +1,9 @@
+python-etcd (0.4.0~git20150608+d7069c1-1) UNRELEASED; urgency=medium
+
+  * Upgrade of the code 
+
+ -- Joe <glavagetto@wikimedia.org>  Tue, 09 Jun 2015 19:34:19 +0200
+
 python-etcd (0.3.3-1) unstable; urgency=medium
 
   * Initial packaging

@@ -16,7 +16,7 @@ class TestClientApiBase(unittest.TestCase):
     def setUp(self):
         self.client = etcd.Client()
 
-    def _prepare_response(self, s, d):
+    def _prepare_response(self, s, d, cluster_id=None):
         if isinstance(d, dict):
             data = json.dumps(d).encode('utf-8')
         else:
@@ -25,10 +25,11 @@ class TestClientApiBase(unittest.TestCase):
         r = mock.create_autospec(urllib3.response.HTTPResponse)()
         r.status = s
         r.data = data
+        r.getheader.return_value = cluster_id or "abcd1234"
         return r
 
-    def _mock_api(self, status, d):
-        resp = self._prepare_response(status, d)
+    def _mock_api(self, status, d, cluster_id=None):
+        resp = self._prepare_response(status, d, cluster_id=cluster_id)
         self.client.api_execute = mock.create_autospec(
             self.client.api_execute, return_value=resp)
 
@@ -98,27 +99,96 @@ class TestClientApiInternals(TestClientApiBase):
             (('/v2/keys/newdir', 'PUT'), dict(params={'dir': 'true'})))
 
 
-
 class TestClientApiInterface(TestClientApiBase):
     """
     All tests defined in this class are executed also in TestClientRequest.
 
     If a test should be run only in this class, please override the method there.
     """
-
-    def test_machines(self):
+    @mock.patch('urllib3.request.RequestMethods.request')
+    def test_machines(self, mocker):
         """ Can request machines """
         data = ['http://127.0.0.1:4001',
                 'http://127.0.0.1:4002', 'http://127.0.0.1:4003']
         d = ','.join(data)
-        self._mock_api(200, d)
+        mocker.return_value = self._prepare_response(200, d)
         self.assertEquals(data, self.client.machines)
 
-    def test_leader(self):
-        """ Can request the leader """
-        data = "http://127.0.0.1:4001"
+    @mock.patch('etcd.Client.machines', new_callable=mock.PropertyMock)
+    def test_use_proxies(self, mocker):
+        """Do not overwrite the machines cache when using proxies"""
+        mocker.return_value = ['https://10.0.0.2:4001', 'https://10.0.0.3:4001', 'https://10.0.0.4:4001']
+        c = etcd.Client(
+            host=(('localhost', 4001), ('localproxy', 4001)),
+            protocol='https',
+            allow_reconnect=True,
+            use_proxies=True
+        )
+
+        self.assertEquals(c._machines_cache, ['https://localproxy:4001'])
+        self.assertEquals(c._base_uri, 'https://localhost:4001')
+        self.assertNotIn(c.base_uri,c._machines_cache)
+
+        c = etcd.Client(
+            host=(('localhost', 4001), ('10.0.0.2',4001)),
+            protocol='https',
+            allow_reconnect=True,
+            use_proxies=False
+        )
+        self.assertIn('https://10.0.0.3:4001', c._machines_cache)
+        self.assertNotIn(c.base_uri,c._machines_cache)
+
+
+    def test_members(self):
+        """ Can request machines """
+        data = {
+            "members":
+            [
+                {
+                    "id": "ce2a822cea30bfca",
+                    "name": "default",
+                    "peerURLs": ["http://localhost:2380", "http://localhost:7001"],
+                    "clientURLs": ["http://127.0.0.1:4001"]
+                }
+            ]
+        }
         self._mock_api(200, data)
-        self.assertEquals(self.client.leader, data)
+        self.assertEquals(self.client.members["ce2a822cea30bfca"]["id"], "ce2a822cea30bfca")
+
+    def test_self_stats(self):
+        """ Request for stats """
+        data = {
+            "id": "eca0338f4ea31566",
+            "leaderInfo": {
+                "leader": "8a69d5f6b7814500",
+                "startTime": "2014-10-24T13:15:51.186620747-07:00",
+                "uptime": "10m59.322358947s"
+            },
+            "name": "node3",
+            "recvAppendRequestCnt": 5944,
+            "recvBandwidthRate": 570.6254930219969,
+            "recvPkgRate": 9.00892789741075,
+            "sendAppendRequestCnt": 0,
+            "startTime": "2014-10-24T13:15:50.072007085-07:00",
+            "state": "StateFollower"
+        }
+        self._mock_api(200,data)
+        self.assertEquals(self.client.stats['name'], "node3")
+
+    def test_leader_stats(self):
+        """ Request for leader stats """
+        data = {"leader": "924e2e83e93f2560", "followers": {}}
+        self._mock_api(200,data)
+        self.assertEquals(self.client.leader_stats['leader'], "924e2e83e93f2560")
+
+
+    @mock.patch('etcd.Client.members', new_callable=mock.PropertyMock)
+    def test_leader(self, mocker):
+        """ Can request the leader """
+        members = {"ce2a822cea30bfca": {"id": "ce2a822cea30bfca", "name": "default"}}
+        mocker.return_value = members
+        self._mock_api(200, {"leader": "ce2a822cea30bfca", "followers": {}})
+        self.assertEquals(self.client.leader, members["ce2a822cea30bfca"])
 
     def test_set_plain(self):
         """ Can set a value """
@@ -130,7 +200,7 @@ class TestClientApiInterface(TestClientApiBase):
                  u'ttl': 19,
                  u'value': u'test'
              }
-             }
+         }
 
         self._mock_api(200, d)
         res = self.client.write('/testkey', 'test')
@@ -327,121 +397,14 @@ class TestClientApiInterface(TestClientApiBase):
         self.assertEquals(res, etcd.EtcdResult(**d))
 
 
-class EtcdLockTestCase(TestClientApiBase):
-    def setUp(self):
-        self.client = etcd.Client()
-
-    def _mock_api(self, status, d):
-        #We want to test at a lower level here.
-        resp = self._prepare_response(status, d)
-        self.client.http.request_encode_body = mock.create_autospec(
-            self.client.http.request_encode_body, return_value=resp
-        )
-        self.client.http.request = mock.create_autospec(
-            self.client.http.request, return_value=resp
-        )
-
-
-    def test_acquire_lock(self):
-        """ Can get a lock. """
-        key = u'/testkey'
-        ttl = 1
-        self._mock_api(200, '2')
-        lock = self.client.get_lock(key, ttl=ttl)
-        lock.acquire()
-        self.assertEquals(lock._index, '2')
-
-    def test_acquire_lock_invalid_ttl(self):
-        """ Invalid TTL throws an error """
-        key = u'/testkey'
-        ttl = u'invalid'
-        expected_index = u'invalid'
-        self._mock_exception(etcd.EtcdException, u'invalid ttl: invalid')
-        lock = self.client.get_lock(key, ttl=ttl)
-        self.assertRaises(etcd.EtcdException, lock.acquire)
-
-    def test_acquire_lock_with_context_manager(self):
-        key = u'/testkey'
-        ttl = 1
-        self._mock_api(200, u'2')
-        lock = self.client.get_lock(key, ttl=ttl)
-        with lock:
-            self.assertTrue(lock.is_locked())
-        self._mock_api(200, u'')
-        self.assertFalse(lock.is_locked())
-
-    def test_is_locked(self):
-        key = u'/testkey'
-        ttl = 1
-        self._mock_api(200, u'')
-        lock = self.client.get_lock(key, ttl=ttl)
-        self.assertFalse(lock.is_locked())
-        self._mock_api(200, u'2')
-        lock.acquire()
-        self.assertTrue(lock.is_locked())
-
-
-    def test_renew(self):
-        key = '/testkey'
-        ttl = 1
-        self._mock_api(200, u'2')
-        lock = self.client.get_lock(key, ttl=ttl)
-        lock.acquire()
-        self.assertTrue(lock.is_locked())
-        self._mock_api(200, u'')
-        lock.renew(2)
-        self._mock_api(200, u'2')
-        self.assertTrue(lock.is_locked())
-
-    def test_renew_fails_if_expired(self):
-        self._mock_api(200, u'4')
-        lock = self.client.get_lock('/testlock', value='test', ttl=1).acquire()
-        self._mock_api(500, 'renew lock error: cannot find: test')
-        self.assertRaises(etcd.EtcdException, lock.renew, 10)
-
-    def test_renew_fails_without_locking(self):
-        key = u'/testkey'
-        ttl = 1
-        self._mock_exception(etcd.EtcdException,
-                             u'Cannot renew lock that is not locked')
-        lock = self.client.get_lock(key, ttl=ttl)
-        self.assertRaises(etcd.EtcdException, lock.renew, 2)
-
-    def test_release(self):
-        key = u'/testkey'
-        ttl = 1
-        index = u'2'
-        self._mock_api(200, index)
-        lock = self.client.get_lock(key, ttl=ttl)
-        lock.acquire()
-        self.assertTrue(lock.is_locked())
-        self._mock_api(200, '')
-        lock.release()
-        self.assertFalse(lock.is_locked())
-
-    def test_release_fails_without_locking(self):
-        key = u'/testkey'
-        ttl = 1
-        self._mock_exception(etcd.EtcdException,
-                             u'Cannot release lock that is not locked')
-        lock = self.client.get_lock(key, ttl=ttl)
-        self.assertRaises(etcd.EtcdException, lock.release)
-
-    def test_release_fails_if_expired(self):
-        self._mock_api(200, u'4')
-        lock = self.client.get_lock('/testlock', value='test', ttl=1).acquire()
-        self._mock_api(500, 'release lock error: cannot find: test')
-        self.assertRaises(etcd.EtcdException, lock.release)
-
-
-
 class TestClientRequest(TestClientApiInterface):
 
     def setUp(self):
-        self.client = etcd.Client()
+        self.client = etcd.Client(expected_cluster_id="abcdef1234")
 
-    def _mock_api(self, status, d):
+    def _mock_api(self, status, d, cluster_id=None):
         resp = self._prepare_response(status, d)
+        resp.getheader.return_value = cluster_id or "abcdef1234"
         self.client.http.request_encode_body = mock.create_autospec(
             self.client.http.request_encode_body, return_value=resp
         )
@@ -449,11 +412,13 @@ class TestClientRequest(TestClientApiInterface):
             self.client.http.request, return_value=resp
         )
 
-    def _mock_error(self, error_code, msg, cause, method='PUT', fields=None):
+    def _mock_error(self, error_code, msg, cause, method='PUT', fields=None,
+                    cluster_id=None):
         resp = self._prepare_response(
             500,
             {'errorCode': error_code, 'message': msg, 'cause': cause}
         )
+        resp.getheader.return_value = cluster_id or "abcdef1234"
         self.client.http.request_encode_body = mock.create_autospec(
             self.client.http.request_encode_body, return_value=resp
         )
@@ -482,6 +447,22 @@ class TestClientRequest(TestClientApiInterface):
         """ Exception will be raised if an unsupported HTTP method is used """
         self.assertRaises(etcd.EtcdException,
                           self.client.api_execute, '/testpath/bar', 'TRACE')
+
+    def test_read_cluster_id_changed(self):
+        """ Read timeout set to the default """
+        d = {u'action': u'set',
+             u'node': {
+                u'expiration': u'2013-09-14T00:56:59.316195568+02:00',
+                u'modifiedIndex': 6,
+                u'key': u'/testkey',
+                u'ttl': 19,
+                u'value': u'test'
+                }
+             }
+        self._mock_api(200, d, cluster_id="notabcd1234")
+        self.assertRaises(etcd.EtcdClusterIdChanged,
+                          self.client.read, '/testkey')
+        self.client.read("/testkey")
 
     def test_not_in(self):
         pass
