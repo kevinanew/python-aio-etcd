@@ -181,6 +181,7 @@ class Client(object):
         """Explicitly release the etcd connection(s)."""
         if self._client is not None:
             self._client.close()
+            self._client = None
 
     @asyncio.coroutine
     def _update_machines(self):
