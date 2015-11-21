@@ -18,7 +18,6 @@ import ssl
 import dns.resolver
 import aioetcd as etcd
 import asyncio
-import inspect
 
 try:
     from urlparse import urlparse
@@ -727,7 +726,7 @@ class Client(object):
             response = yield from self.watch(key, index=local_index, recursive=recursive)
             local_index = response.modifiedIndex + 1
             res = callback(response)
-            if isinstance(res, asyncio.Future) or inspect.isgenerator(res):
+            if isinstance(res, asyncio.Future) or asyncio.iscoroutine(res):
                 try:
                     yield from res
                 except etcd.StopWatching:
