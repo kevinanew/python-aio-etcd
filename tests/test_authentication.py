@@ -54,29 +54,29 @@ class TestAuthentication(unittest.TestCase):
         yield from self.client.create_role('role')
 
         # Empty to [root]
-        user.roles = ['root']
+        yield from user.set_roles('root')
         user = yield from self.client.get_user('username')
         assert user.roles == ('root',)
 
         # [root] to [root,role]
-        user.roles = ['root', 'role']
+        yield from user.set_roles('root', 'role')
         user = yield from self.client.get_user('username')
         assert user.roles == ('role', 'root')
 
         # [root,role] to [role]
-        user.roles = ['role']
+        yield from user.set_roles('role')
         user = yield from self.client.get_user('username')
         assert user.roles == ('role',)
 
     def test_usernames_empty(self):
         self.client = auth.AuthClient(port=6001)
-        assert len(self.client.usernames) == 0
+        assert len((yield from self.client.usernames())) == 0
 
     @helpers.run_async
     def test_usernames(loop,self):
         self.client = auth.AuthClient(port=6001, loop=loop)
         yield from self.client.create_user('username', 'password', roles=['root'])
-        assert (yield from self.client.usernames) == ['username']
+        assert (yield from self.client.usernames()) == ['username']
 
     @helpers.run_async
     def test_users(loop,self):
@@ -96,7 +96,12 @@ class TestAuthentication(unittest.TestCase):
     @helpers.run_async
     def test_get_user_not_found(loop,self):
         self.client = auth.AuthClient(port=6001, loop=loop)
-        self.assertRaises(etcd.EtcdException, (yield from self.client.get_user), 'username')
+        try:
+            yield from self.client.get_user('username')
+        except etcd.EtcdException:
+            pass
+        else:
+            assert False, "get_user was not supposed to work"
 
     @helpers.run_async
     def test_set_user_password(loop,self):
@@ -104,7 +109,7 @@ class TestAuthentication(unittest.TestCase):
         yield from self.client.create_user('username', 'password', roles=['root'])
         user = yield from self.client.get_user('username')
         assert not user.password
-        user.password = 'new_password'
+        yield from user.set_password('new_password')
         assert not user.password
 
     @helpers.run_async
@@ -160,8 +165,12 @@ class TestAuthentication(unittest.TestCase):
     def test_modify_role_invalid(loop,self):
         self.client = auth.AuthClient(port=6001, loop=loop)
         role = yield from self.client.create_role('role')
-        self.assertRaises(ValueError, role.permissions.__setitem__, '/foo/*',
-                          '')
+        try:
+            yield from role.permissions.set('/foo/*', '')
+        except ValueError:
+            pass
+        else:
+            assert False, "permission.set() was not supposed to work"
 
     @helpers.run_async
     def test_modify_role_permissions(loop,self):
@@ -191,7 +200,7 @@ class TestAuthentication(unittest.TestCase):
         assert role.permissions['/foo/*'] == 'W'
 
     @helpers.run_async
-    def test_role_names_empty(self):
+    def test_role_names_empty(loop,self):
         self.client = auth.AuthClient(port=6001, loop=loop)
         assert (yield from self.client.role_names()) == ['root']
 
@@ -233,5 +242,10 @@ class TestAuthentication(unittest.TestCase):
     @helpers.run_async
     def test_enable_auth_before_root_created(loop,self):
         self.client = auth.AuthClient(port=6001, loop=loop)
-        self.assertRaises(etcd.EtcdException, (yield from self.client.toggle_auth), True)
+        try:
+            yield from self.client.toggle_auth()
+        except etcd.EtcdException:
+            pass
+        else:
+            assert False, "toggle_auto was not supposed to work"
 

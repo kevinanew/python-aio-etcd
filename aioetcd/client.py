@@ -805,6 +805,17 @@ class Client(object):
                 # IO-related errors in this method rather than when we try to
                 # access it later.
                 yield from response.read()
+                try:
+                    response = yield from self._handle_server_response(response)
+                except etcd.EtcdException as e:
+                    if "during rolling upgrades" in e.payload['message']:
+                        response = False
+                        some_request_failed = True
+                        continue
+                    raise
+                else:
+                    break
+
 
             # earlier versions don't wrap socket errors
             except (HTTPException, socket.error, DisconnectedError, ClientConnectionError,ClientResponseError) as e:
@@ -827,7 +838,6 @@ class Client(object):
                 # The cluster may have changed since last invocation
                 self._machines_cache = yield from self.machines()
             self._machines_cache.remove(self._base_uri)
-        response = yield from self._handle_server_response(response)
         return response
 
     def _check_cluster_id(self, response):

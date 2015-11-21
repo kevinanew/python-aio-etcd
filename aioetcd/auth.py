@@ -46,12 +46,11 @@ class AuthClient(Client):
                 params[role_action] = roles
 
             response = yield from self.json_api_execute(uri, self._MPUT, params=params)
-            res = json.loads(response.data.decode('utf-8'))
-            return EtcdUser(self, res)
+            return EtcdUser(self, response)
         except Exception as e:
             _log.error("Failed to create user in %s%s: %r",
                        self._base_uri, self.version_prefix, e)
-            raise etcd.EtcdException("Could not create user") from e
+            raise # etcd.EtcdException("Could not create user") from e
 
     @asyncio.coroutine
     def get_user(self, username):
@@ -70,12 +69,12 @@ class AuthClient(Client):
         try:
             uri = self.version_prefix + '/auth/users/' + username
             response = yield from self.api_execute(uri, self._MGET)
-            res = json.loads(response.data.decode('utf-8'))
+            res = json.loads((yield from response.read()).decode('utf-8'))
             return EtcdUser(self, res)
         except Exception as e:
             _log.error("Failed to fetch user in %s%s: %r",
                        self._base_uri, self.version_prefix, e)
-            raise etcd.EtcdException("Could not fetch user") from e
+            raise # etcd.EtcdException("Could not fetch user") from e
 
     @asyncio.coroutine
     def usernames(self):
@@ -83,7 +82,7 @@ class AuthClient(Client):
         try:
             uri = self.version_prefix + '/auth/users'
             response = yield from self.api_execute(uri, self._MGET)
-            res = json.loads(response.data.decode('utf-8'))
+            res = json.loads((yield from response.read()).decode('utf-8'))
             return res['users']
         except Exception as e:
             _log.error("Failed to list users in %s%s: %r",
@@ -93,7 +92,10 @@ class AuthClient(Client):
     @asyncio.coroutine
     def users(self):
         """List users in detail."""
-        return [self.get_user(x) for x in (yield from self.usernames)]
+        res = []
+        for u in (yield from self.usernames()):
+            res.append((yield from self.get_user(u)))
+        return res
 
     def create_role(self, role_name):
         """
@@ -122,7 +124,7 @@ class AuthClient(Client):
         try:
             uri = self.version_prefix + '/auth/roles/' + role_name
             response = yield from self.api_execute(uri, self._MGET)
-            res = json.loads(response.data.decode('utf-8'))
+            res = json.loads((yield from response.read()).decode('utf-8'))
             return EtcdRole(self, res)
         except Exception as e:
             _log.error("Failed to fetch user in %s%s: %r",
@@ -135,7 +137,7 @@ class AuthClient(Client):
         try:
             uri = self.version_prefix + '/auth/roles'
             response = yield from self.api_execute(uri, self._MGET)
-            res = json.loads(response.data.decode('utf-8'))
+            res = json.loads((yield from response.read()).decode('utf-8'))
             return res['roles']
         except Exception as e:
             _log.error("Failed to list roles in %s%s: %r",
@@ -145,7 +147,7 @@ class AuthClient(Client):
     @asyncio.coroutine
     def roles(self):
         """List roles in detail."""
-        return [self.get_role(x) for x in (yield from self.role_names)]
+        return [self.get_role(x) for x in (yield from self.role_names())]
 
     @asyncio.coroutine
     def toggle_auth(self, auth_enabled=True):
@@ -183,8 +185,7 @@ class AuthClient(Client):
                     }
                 }
             response = yield from self.json_api_execute(uri, self._MPUT, params=params)
-            res = json.loads(response.data.decode('utf-8'))
-            return EtcdRole(self, res)
+            return EtcdRole(self, response)
         except Exception as e:
             _log.error("Failed to modify role in %s%s: %r",
                        self._base_uri, self.version_prefix, e)
@@ -251,7 +252,6 @@ class AuthClient(Client):
                     response = yield from self._handle_server_response(response)
                 except etcd.EtcdException as e:
                     if "during rolling upgrades" in e.payload['message']:
-                        import pdb;pdb.set_trace()
                         response = False
                         continue
                     raise
@@ -263,7 +263,8 @@ class AuthClient(Client):
                 # The cluster may have changed since last invocation
                 self._machines_cache = self.machines
             self._machines_cache.remove(self._base_uri)
-        return response
+
+        return json.loads((yield from response.read()).decode('utf-8'))
 
 
 class EtcdUser(object):
@@ -287,7 +288,9 @@ class EtcdUser(object):
         return tuple(self._roles)
 
     @asyncio.coroutine
-    def roles(self, roles):
+    def set_roles(self, *roles):
+        if len(roles) == 1 and not isinstance(roles[0],str):
+            roles = roles[0]
         existing_roles = set(self._roles)
         new_roles = set(roles)
 
