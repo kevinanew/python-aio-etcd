@@ -1,3 +1,9 @@
+aioetcd (0.4.2+git1-4d8231afd-1) smurf; urgency=medium
+
+  * upstream merge
+
+ -- Matthias Urlichs <matthias@urlichs.de>  Sat, 21 Nov 2015 16:28:09 +0100
+
 aioetcd (0.4.2-3) smurf; urgency=medium
 
   * fix packaging
