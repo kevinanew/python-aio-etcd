@@ -16,7 +16,7 @@ import aiohttp
 import json
 import ssl
 import dns.resolver
-import aioetcd
+import aioetcd as etcd
 import asyncio
 import inspect
 
@@ -202,7 +202,7 @@ class Client(object):
             self._client = aiohttp.ClientSession(loop=loop)
 
     def __del__(self):
-        self.release()
+        self.close()
 
     def close(self):
         """Explicitly release the etcd connection(s)."""
@@ -248,11 +248,6 @@ class Client(object):
         return self._protocol
 
     @property
-    def read_timeout(self):
-        """Max seconds to wait for a read."""
-        return self._read_timeout
-
-    @property
     def allow_redirect(self):
         """Allow the client to connect to other nodes."""
         return self._allow_redirect
@@ -295,7 +290,7 @@ class Client(object):
                             self._base_uri, self.version_prefix, e)
             retries += 1
             yield from asyncio.sleep(retries/10, loop=self._loop)
-        raise aioetcd.EtcdException("Could not get the list of servers, "
+        raise etcd.EtcdException("Could not get the list of servers, "
                                     "maybe you provided the wrong "
                                     "host(s) to connect to?")
 
@@ -316,7 +311,7 @@ class Client(object):
                 self._members[member['id']] = member
             return self._members
         except Exception as e:
-            raise aioetcd.EtcdException("Could not get the members list, maybe the cluster has gone away?") from e
+            raise etcd.EtcdException("Could not get the members list, maybe the cluster has gone away?") from e
 
     @asyncio.coroutine
     def leader(self):
@@ -333,7 +328,7 @@ class Client(object):
             leader = json.loads(data.decode('utf-8'))
             return (yield from self.members())[leader['leaderInfo']['leader']]
         except Exception as exc:
-            raise aioetcd.EtcdException("Cannot get leader data") from exc
+            raise etcd.EtcdException("Cannot get leader data") from exc
 
     def stats(self):
         """
@@ -368,7 +363,7 @@ class Client(object):
         try:
             return json.loads(data)
         except (TypeError,ValueError) as e:
-            raise aioetcd.EtcdException("Cannot parse json data in the response") from e
+            raise etcd.EtcdException("Cannot parse json data in the response") from e
 
     @property
     def key_endpoint(self):
@@ -441,7 +436,7 @@ class Client(object):
 
         if dir:
             if value:
-                raise aioetcd.EtcdException(
+                raise etcd.EtcdException(
                     'Cannot create a directory with a value')
             params['dir'] = "true"
 
@@ -755,13 +750,13 @@ class Client(object):
             raise etcd.EtcdException(
                 'Server response was not valid JSON: %r', raw_response)
         try:
-            r = aioetcd.EtcdResult(**res)
+            r = etcd.EtcdResult(**res)
             if response.status == 201:
                 r.newKey = True
             r.parse_headers(response)
             return r
         except Exception as e:
-            raise aioetcd.EtcdException(
+            raise etcd.EtcdException(
                 'Unable to decode server response') from e
 
     def _next_server(self, cause=None):
@@ -772,7 +767,7 @@ class Client(object):
             mach = self._machines_cache.pop()
         except IndexError as e:
             _log.error("Machines cache is empty, no machines to try.")
-            raise aioetcd.EtcdConnectionFailed('No more machines in the cluster', cause=cause) from e
+            raise etcd.EtcdConnectionFailed('No more machines in the cluster', cause=cause) from e
         else:
             _log.info("Selected new etcd server %s", mach)
             return mach
@@ -824,7 +819,7 @@ class Client(object):
                     some_request_failed = True
                 else:
                     _log.debug("Reconnection disabled, giving up.")
-                    raise aioetcd.EtcdConnectionFailed(
+                    raise etcd.EtcdConnectionFailed(
                         "Connection to etcd failed") from e
 
         if some_request_failed:
@@ -869,7 +864,7 @@ class Client(object):
                 # Bad JSON, make a response locally.
                 r = {"message": "Bad response",
                      "cause": str(resp)}
-            aioetcd.EtcdError.handle(r)
+            etcd.EtcdError.handle(r)
 
     def _get_auth(self):
         if self.username and self.password:
