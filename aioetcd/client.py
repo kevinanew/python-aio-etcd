@@ -387,8 +387,8 @@ class Client(object):
         'newValue'
 
         """
-        _log.debug("Writing %s to key %s ttl=%s dir=%s append=%s",
-                  value, key, ttl, dir, append)
+        _log.debug("Writing %s to key %s ttl=%s dir=%s append=%s %s",
+                  value, key, ttl, dir, append, kwdargs)
         key = self._sanitize_key(key)
         params = {}
         if value is not None:
