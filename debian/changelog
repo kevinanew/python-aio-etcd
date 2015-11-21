@@ -1,8 +1,9 @@
-aioetcd (0.4.2+git3-4d8231afd-1) smurf; urgency=medium
+aioetcd (0.4.2+git4-4d8231afd-1) smurf; urgency=medium
 
   * Update setup.py
+  * Fix pytest args
 
- -- Matthias Urlichs <matthias@urlichs.de>  Sat, 21 Nov 2015 16:32:45 +0100
+ -- Matthias Urlichs <matthias@urlichs.de>  Sat, 21 Nov 2015 16:43:17 +0100
 
 aioetcd (0.4.2+git1-4d8231afd-1) smurf; urgency=medium
 
