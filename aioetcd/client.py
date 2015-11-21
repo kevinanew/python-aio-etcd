@@ -175,6 +175,10 @@ class Client(object):
             self._client = aiohttp.ClientSession(loop=loop)
 
     def __del__(self):
+        self.release()
+
+    def close(self):
+        """Explicitly release the etcd connection(s)."""
         if self._client is not None:
             self._client.close()
 
