@@ -10,10 +10,12 @@ import logging
 #from http.client import HTTPException
 from aiohttp.web_exceptions import HTTPException
 from aiohttp.errors import DisconnectedError,ClientConnectionError,ClientResponseError
+from aiohttp.helpers import BasicAuth
 import socket
 import aiohttp
 import json
 import ssl
+import dns.resolver
 import aioetcd
 import asyncio
 import inspect
@@ -47,11 +49,14 @@ class Client(object):
             self,
             host='127.0.0.1',
             port=4001,
+            srv_domain=None,
             version_prefix='/v2',
             allow_redirect=True,
             protocol='http',
             cert=None,
             ca_cert=None,
+            username=None,
+            password=None,
             allow_reconnect=False,
             use_proxies=False,
             expected_cluster_id=None,
@@ -69,6 +74,8 @@ class Client(object):
 
             port (int):  Port used to connect to etcd.
 
+            srv_domain (str): Domain to search the SRV record for cluster autodiscovery.
+
             version_prefix (str): Url or version prefix in etcd url (default=/v2).
 
             allow_redirect (bool): allow the client to connect to other nodes.
@@ -80,6 +87,10 @@ class Client(object):
 
             ca_cert (str): The ca certificate. If pressent it will enable
                            validation.
+
+            username (str): username for etcd authentication.
+
+            password (str): password for etcd authentication.
 
             allow_reconnect (bool): allow the client to reconnect to another
                                     etcd server in the cluster in the case the
@@ -98,8 +109,15 @@ class Client(object):
                                       by host. By default this will use up to 10
                                       connections.
         """
-        _log.debug("New etcd client created for %s:%s%s",
-                  host, port, version_prefix)
+
+        # If a DNS record is provided, use it to get the hosts list
+        if srv_domain is not None:
+            try:
+                host = self._discover(srv_domain)
+            except Exception as e:
+                _log.error("Could not discover the etcd hosts from %s: %s",
+                           srv_domain, e)
+
         self._protocol = protocol
         self._loop = loop if loop is not None else asyncio.get_event_loop()
 
@@ -112,7 +130,7 @@ class Client(object):
         else:
             if not allow_reconnect:
                 _log.error("List of hosts incompatible with allow_reconnect.")
-                raise aioetcd.EtcdException("A list of hosts to connect to was given, but reconnection not allowed?")
+                raise etcd.EtcdException("A list of hosts to connect to was given, but reconnection not allowed?")
             self._machines_cache = [uri(self._protocol, *conn) for conn in host]
             self._base_uri = self._machines_cache.pop(0)
 
@@ -145,6 +163,15 @@ class Client(object):
         if ca_cert:
             ssl_ctx.load_verify_locations(ca_cert)
 
+        self.username = None
+        self.password = None
+        if username and password:
+            self.username = username
+            self.password = password
+        elif username:
+            _log.warning('Username provided without password, both are required for authentication')
+        elif password:
+            _log.warning('Password provided without username, both are required for authentication')
         if self._allow_reconnect:
             # we need the set of servers in the cluster in order to try
             # reconnecting upon error. The cluster members will be
@@ -187,6 +214,18 @@ class Client(object):
     def _update_machines(self):
         self._machines_cache = yield from self.machines()
         self._machines_available = True
+
+    def _discover(self, domain):
+        srv_name = "_etcd._tcp.{}".format(domain)
+        answers = dns.resolver.query(srv_name, 'SRV')
+        hosts = []
+        for answer in answers:
+            hosts.append(
+                (answer.target.to_text(omit_final_dot=True), answer.port))
+        _log.debug("Found %s", hosts)
+        if not len(hosts):
+            raise ValueError("The SRV record is present but no host were found")
+        return tuple(hosts)
 
     @property
     def base_uri(self):
@@ -302,6 +341,7 @@ class Client(object):
             dict. the stats of the local server
         """
         return self._stats()
+    stats._is_coroutine = True
 
     def leader_stats(self):
         """
@@ -309,6 +349,7 @@ class Client(object):
             dict. the stats of the leader
         """
         return self._stats('leader')
+    leader_stats._is_coroutine = True
 
     def store_stats(self):
         """
@@ -316,6 +357,7 @@ class Client(object):
            dict. the stats of the kv store
         """
         return self._stats('store')
+    store_stats._is_coroutine = True
 
     @asyncio.coroutine
     def _stats(self, what='self'):
@@ -346,7 +388,7 @@ class Client(object):
         try:
             yield from self.get(key)
             return True
-        except aioetcd.EtcdKeyNotFound:
+        except etcd.EtcdKeyNotFound:
             return False
 
     def _sanitize_key(self, key):
@@ -568,6 +610,7 @@ class Client(object):
 
         """
         return self.delete(key=key, recursive=recursive, dir=dir, **kwdargs)._prev_node
+    pop._is_coroutine = True
 
     # Higher-level methods on top of the basic primitives
     def test_and_set(self, key, value, prev_value, ttl=None):
@@ -594,6 +637,7 @@ class Client(object):
 
         """
         return self.write(key, value, prevValue=prev_value, ttl=ttl)
+    test_and_set._is_coroutine = True
 
     def set(self, key, value, ttl=None):
         """
@@ -608,10 +652,11 @@ class Client(object):
             A coroutine returning client.EtcdResult
 
         Raises:
-           aioetcd.EtcdException: when something weird goes wrong.
+           etcd.EtcdException: when something weird goes wrong.
 
         """
         return self.write(key, value, ttl=ttl)
+    set._is_coroutine = True
 
     def get(self, key):
         """
@@ -631,6 +676,7 @@ class Client(object):
 
         """
         return self.read(key)
+    get._is_coroutine = True
 
     def watch(self, key, index=None, recursive=None):
         """
@@ -658,6 +704,7 @@ class Client(object):
             return self.read(key, wait=True, waitIndex=index, recursive=recursive)
         else:
             return self.read(key, wait=True, recursive=recursive)
+    watch._is_coroutine = True
 
     @asyncio.coroutine
     def eternal_watch(self, key, callback, index=None, recursive=None):
@@ -688,7 +735,7 @@ class Client(object):
             if isinstance(res, asyncio.Future) or inspect.isgenerator(res):
                 try:
                     yield from res
-                except aioetcd.StopWatching:
+                except etcd.StopWatching:
                     return local_index
 
     def get_lock(self, *args, **kwargs):
@@ -751,6 +798,7 @@ class Client(object):
                     method,
                     url,
                     params=params,
+                    auth=self._get_auth(),
                     allow_redirects=self.allow_redirect,
                     )
 
@@ -822,4 +870,9 @@ class Client(object):
                 r = {"message": "Bad response",
                      "cause": str(resp)}
             aioetcd.EtcdError.handle(r)
+
+    def _get_auth(self):
+        if self.username and self.password:
+            return BasicAuth(self.username, self.password)
+        return None
 

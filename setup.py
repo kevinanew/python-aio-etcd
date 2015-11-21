@@ -10,6 +10,7 @@ version = '0.4.2'
 
 install_requires = [
     'aiohttp',
+    'dnspython3',
 ]
 
 test_requires = [
