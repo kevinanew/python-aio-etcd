@@ -1,3 +1,9 @@
+aioetcd (0.4.2+git5-4d8231afd-1) smurf; urgency=medium
+
+  * Log thr result
+
+ -- Matthias Urlichs <matthias@urlichs.de>  Tue, 24 Nov 2015 08:12:29 +0100
+
 aioetcd (0.4.2+git4-4d8231afd-1) smurf; urgency=medium
 
   * Update setup.py

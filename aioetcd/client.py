@@ -748,6 +748,7 @@ class Client(object):
         except (TypeError, ValueError, UnicodeError) as e:
             raise etcd.EtcdException(
                 'Server response was not valid JSON: %r', raw_response)
+        _log.debug("result: %s", res)
         try:
             r = etcd.EtcdResult(**res)
             if response.status == 201:
