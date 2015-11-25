@@ -672,6 +672,7 @@ class Client(object):
         return self.read(key)
     get._is_coroutine = True
 
+    @asyncio.coroutine
     def watch(self, key, index=None, recursive=None):
         """
         Blocks until a new event has been received, starting at index 'index'
@@ -693,12 +694,13 @@ class Client(object):
         'value'
 
         """
-        _log.debug("About to wait on key %s, index %s", key, index)
+        _log.debug("Wait %s on %s", index, key)
         if index:
-            return self.read(key, wait=True, waitIndex=index, recursive=recursive)
+            res = yield from self.read(key, wait=True, waitIndex=index, recursive=recursive)
         else:
-            return self.read(key, wait=True, recursive=recursive)
-    watch._is_coroutine = True
+            res = yield from self.read(key, wait=True, recursive=recursive)
+        _log.debug("Wait %s on %s done: %s",index, key, res)
+        return res
 
     @asyncio.coroutine
     def eternal_watch(self, key, callback, index=None, recursive=None):

@@ -1,3 +1,9 @@
+aioetcd (0.4.2+git6-4d8231afd-1) smurf; urgency=medium
+
+  * Extend logging.
+
+ -- Matthias Urlichs <matthias@urlichs.de>  Wed, 25 Nov 2015 03:10:37 +0100
+
 aioetcd (0.4.2+git5-4d8231afd-1) smurf; urgency=medium
 
   * Log thr result
