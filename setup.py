@@ -50,7 +50,7 @@ setup(
         "Topic :: Database :: Front-Ends",
     ],
     keywords='etcd raft distributed log api client',
-    author='Mathias Urlichs',
+    author='Matthias Urlichs',
     author_email='matthias@urlichs.de',
     url='http://github.com/smurfix/aioetcd',
     license='MIT',
