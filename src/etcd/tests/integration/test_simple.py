@@ -13,6 +13,7 @@ from . import helpers
 log = logging.getLogger()
 
 class EtcdIntegrationTest(unittest.TestCase):
+    cl_size = 3
 
     @classmethod
     def setUpClass(cls):
@@ -23,7 +24,7 @@ class EtcdIntegrationTest(unittest.TestCase):
             proc_name=program,
             port_range_start=6001,
             internal_port_range_start=8001)
-        cls.processHelper.run(number=1)
+        cls.processHelper.run(number=cls.cl_size)
 
     @classmethod
     def tearDownClass(cls):

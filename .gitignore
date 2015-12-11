@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 *.pyc
 
 .installed.cfg
@@ -12,7 +13,6 @@ tmp
 build
 dist
 docs
-etcd
 .coverage
 *.swp
 /.pybuild

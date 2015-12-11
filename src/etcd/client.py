@@ -18,6 +18,7 @@ import ssl
 import dns.resolver
 import aioetcd as etcd
 import asyncio
+from functools import wraps
 
 try:
     from urlparse import urlparse
@@ -209,9 +210,8 @@ class Client(object):
             self._client.close()
             self._client = None
 
-    @asyncio.coroutine
-    def _update_machines(self):
-        self._machines_cache = yield from self.machines()
+    async def _update_machines(self):
+        self._machines_cache = await self.machines()
         self._machines_available = True
 
     def _discover(self, domain):
@@ -251,8 +251,7 @@ class Client(object):
         """Allow the client to connect to other nodes."""
         return self._allow_redirect
 
-    @asyncio.coroutine
-    def machines(self):
+    async def machines(self):
         """
         Members of the cluster.
 
@@ -268,14 +267,14 @@ class Client(object):
             for m in [self._base_uri]+self._machines_cache:
                 try:
                     uri = m + self.version_prefix + '/machines'
-                    response = yield from self._client.request(
+                    response = await self._client.request(
                         self._MGET,
                         uri,
                         allow_redirects=self.allow_redirect,
                     )
 
-                    response = yield from self._handle_server_response(response)
-                    response = yield from response.read()
+                    response = await self._handle_server_response(response)
+                    response = await response.read()
                     if response != b"":
                         machines = [
                             node.strip() for node in response.decode('utf-8').split(',')
@@ -288,13 +287,12 @@ class Client(object):
                     _log.error("Failed to get list of machines from %s%s: %r",
                             self._base_uri, self.version_prefix, e)
             retries += 1
-            yield from asyncio.sleep(retries/10, loop=self._loop)
+            await asyncio.sleep(retries/10, loop=self._loop)
         raise etcd.EtcdException("Could not get the list of servers, "
                                     "maybe you provided the wrong "
                                     "host(s) to connect to?")
 
-    @asyncio.coroutine
-    def members(self):
+    async def members(self):
         """
         A more structured view of peers in the cluster.
 
@@ -303,8 +301,8 @@ class Client(object):
         # Empty the members list
         self._members = {}
         try:
-            response = yield from self.api_execute(self.version_prefix + '/members', self._MGET)
-            data = yield from response.read()
+            response = await self.api_execute(self.version_prefix + '/members', self._MGET)
+            data = await response.read()
             res = json.loads(data.decode('utf-8'))
             for member in res['members']:
                 self._members[member['id']] = member
@@ -312,8 +310,7 @@ class Client(object):
         except Exception as e:
             raise etcd.EtcdException("Could not get the members list, maybe the cluster has gone away?") from e
 
-    @asyncio.coroutine
-    def leader(self):
+    async def leader(self):
         """
         Returns:
             dict. the leader of the cluster.
@@ -322,10 +319,10 @@ class Client(object):
         {"id":"ce2a822cea30bfca","name":"default","peerURLs":["http://localhost:2380","http://localhost:7001"],"clientURLs":["http://127.0.0.1:4001"]}
         """
         try:
-            response = yield from self.api_execute(self.version_prefix + '/stats/self', self._MGET)
-            data = yield from response.read()
+            response = await self.api_execute(self.version_prefix + '/stats/self', self._MGET)
+            data = await response.read()
             leader = json.loads(data.decode('utf-8'))
-            return (yield from self.members())[leader['leaderInfo']['leader']]
+            return (await self.members())[leader['leaderInfo']['leader']]
         except Exception as exc:
             raise etcd.EtcdException("Cannot get leader data") from exc
 
@@ -353,11 +350,10 @@ class Client(object):
         return self._stats('store')
     store_stats._is_coroutine = True
 
-    @asyncio.coroutine
-    def _stats(self, what='self'):
+    async def _stats(self, what='self'):
         """ Internal method to access the stats endpoints"""
-        data = yield from self.api_execute(self.version_prefix + '/stats/' + what, self._MGET)
-        data = yield from data.read()
+        data = await self.api_execute(self.version_prefix + '/stats/' + what, self._MGET)
+        data = await data.read()
         data = data.decode('utf-8')
         try:
             return json.loads(data)
@@ -371,8 +367,7 @@ class Client(object):
         """
         return self.version_prefix + '/keys'
 
-    @asyncio.coroutine
-    def contains(self, key):
+    async def contains(self, key):
         """
         Check if a key is available in the cluster.
 
@@ -380,7 +375,7 @@ class Client(object):
         True
         """
         try:
-            yield from self.get(key)
+            await self.get(key)
             return True
         except etcd.EtcdKeyNotFound:
             return False
@@ -391,8 +386,7 @@ class Client(object):
         return key
 
 
-    @asyncio.coroutine
-    def write(self, key, value, ttl=None, dir=False, append=False, **kwdargs):
+    async def write(self, key, value, ttl=None, dir=False, append=False, **kwdargs):
         """
         Writes the value for a key, possibly doing atomit Compare-and-Swap
 
@@ -452,17 +446,17 @@ class Client(object):
         else:
             path = self.key_endpoint + key
 
-        response = yield from self.api_execute(path, method, params=params)
-        return (yield from self._result_from_response(response))
+        response = await self.api_execute(path, method, params=params)
+        return (await self._result_from_response(response))
 
     def update(self, obj):
         """
         Updates the value for a key atomically. Typical usage would be:
 
         c = aioetcd.Client()
-        o = yield from c.read("/somekey")
+        o = await c.read("/somekey")
         o.value += 1
-        yield from c.update(o)
+        await c.update(o)
 
         Args:
             obj (aioetcd.EtcdResult):  The object that needs updating.
@@ -481,8 +475,7 @@ class Client(object):
             kwdargs['prevIndex'] = obj.modifiedIndex
         return self.write(obj.key, obj.value, **kwdargs)
 
-    @asyncio.coroutine
-    def read(self, key, **kwdargs):
+    async def read(self, key, **kwdargs):
         """
         Returns the value of the key 'key'.
 
@@ -521,12 +514,11 @@ class Client(object):
                 elif v is not None:
                     params[k] = v
 
-        response = yield from self.api_execute(
+        response = await self.api_execute(
             self.key_endpoint + key, self._MGET, params=params)
-        return (yield from self._result_from_response(response))
+        return (await self._result_from_response(response))
 
-    @asyncio.coroutine
-    def delete(self, key, recursive=None, dir=None, **kwdargs):
+    async def delete(self, key, recursive=None, dir=None, **kwdargs):
         """
         Removed a key from etcd.
 
@@ -570,9 +562,9 @@ class Client(object):
                 kwds[k] = kwdargs[k]
         _log.debug("Calculated params = %s", kwds)
 
-        response = yield from self.api_execute(
+        response = await self.api_execute(
             self.key_endpoint + key, self._MDELETE, params=kwds)
-        return (yield from self._result_from_response(response))
+        return (await self._result_from_response(response))
 
     def pop(self, key, recursive=None, dir=None, **kwdargs):
         """
@@ -672,8 +664,7 @@ class Client(object):
         return self.read(key)
     get._is_coroutine = True
 
-    @asyncio.coroutine
-    def watch(self, key, index=None, recursive=None):
+    async def watch(self, key, index=None, recursive=None):
         """
         Blocks until a new event has been received, starting at index 'index'
 
@@ -696,14 +687,13 @@ class Client(object):
         """
         _log.debug("Wait %s on %s", index, key)
         if index:
-            res = yield from self.read(key, wait=True, waitIndex=index, recursive=recursive)
+            res = await self.read(key, wait=True, waitIndex=index, recursive=recursive)
         else:
-            res = yield from self.read(key, wait=True, recursive=recursive)
+            res = await self.read(key, wait=True, recursive=recursive)
         _log.debug("Wait %s on %s done: %s",index, key, res)
         return res
 
-    @asyncio.coroutine
-    def eternal_watch(self, key, callback, index=None, recursive=None):
+    async def eternal_watch(self, key, callback, index=None, recursive=None):
         """
         Generator that will call the callback every time a key changes.
         Note that this method will block forever until an event is generated
@@ -725,12 +715,12 @@ class Client(object):
         """
         local_index = index
         while True:
-            response = yield from self.watch(key, index=local_index, recursive=recursive)
+            response = await self.watch(key, index=local_index, recursive=recursive)
             local_index = response.modifiedIndex + 1
             res = callback(response)
             if isinstance(res, asyncio.Future) or asyncio.iscoroutine(res):
                 try:
-                    yield from res
+                    await res
                 except etcd.StopWatching:
                     return local_index
 
@@ -741,10 +731,9 @@ class Client(object):
     def election(self):
         raise NotImplementedError('Election primitives were removed from etcd 2.0')
 
-    @asyncio.coroutine
-    def _result_from_response(self, response):
+    async def _result_from_response(self, response):
         """ Creates an EtcdResult from json dictionary """
-        raw_response = yield from response.read()
+        raw_response = await response.read()
         try:
             res = json.loads(raw_response.decode('utf-8'))
         except (TypeError, ValueError, UnicodeError) as e:
@@ -774,73 +763,91 @@ class Client(object):
             _log.info("Selected new etcd server %s", mach)
             return mach
 
-    @asyncio.coroutine
+    def _wrap_request(payload):
+        @wraps(payload)
+        async def wrapper(self, path, method, params=None):
+            some_request_failed = False
+            response = False
+
+            if not path.startswith('/'):
+                raise ValueError('Path does not start with /')
+
+            while not response:
+                try:
+                    response = await payload(self, path, method, params=params)
+                    # Check the cluster ID hasn't changed under us.  We use
+                    # preload_content=False above so we can read the headers
+                    # before we wait for the content of a watch.
+                    self._check_cluster_id(response)
+                    # Now force the data to be preloaded in order to trigger any
+                    # IO-related errors in this method rather than when we try to
+                    # access it later.
+                    _ = response.data
+                    # urllib3 doesn't wrap all httplib exceptions and earlier versions
+                    # don't wrap socket errors either.
+                except (HTTPException, socket.error) as e:
+                    _log.error("Request to server %s failed: %r",
+                               self._base_uri, e)
+                    if self._allow_reconnect:
+                        _log.info("Reconnection allowed, looking for another "
+                                  "server.")
+                        # _next_server() raises EtcdException if there are no
+                        # machines left to try, breaking out of the loop.
+                        self._base_uri = self._next_server(cause=e)
+                        some_request_failed = True
+
+                        # if exception is raised on _ = response.data
+                        # the condition for while loop will be False
+                        # but we should retry
+                        response = False
+                    else:
+                        _log.debug("Reconnection disabled, giving up.")
+                        raise etcd.EtcdConnectionFailed(
+                            "Connection to etcd failed due to %r" % e,
+                            cause=e
+                        )
+                except etcd.EtcdClusterIdChanged as e:
+                    _log.warning(e)
+                    raise
+                except:
+                    _log.exception("Unexpected request failure, re-raising.")
+                    raise
+
+                if some_request_failed:
+                    if not self._use_proxies:
+                        # The cluster may have changed since last invocation
+                        self._machines_cache = self.machines
+                    self._machines_cache.remove(self._base_uri)
+            return self._handle_server_response(response)
+        return wrapper
+
+    @_wrap_request
     def api_execute(self, path, method, params=None):
         """ Executes the query. """
-
-        some_request_failed = False
-        response = False
 
         if not path.startswith('/'):
             raise ValueError('Path does not start with /')
 
-        if not self._machines_available:
-            yield from self._update_machines()
+        return self._client.request(
+            method,
+            url,
+            params=params,
+            auth=self._get_auth(),
+            allow_redirects=self.allow_redirect,
+            )
 
-        while not response:
-            try:
-                url = self._base_uri + path
-
-                response = yield from self._client.request(
-                    method,
-                    url,
-                    params=params,
-                    auth=self._get_auth(),
-                    allow_redirects=self.allow_redirect,
-                    )
-
-                # Check the cluster ID hasn't changed under us.  We use
-                # preload_content=False above so we can read the headers
-                # before we wait for the content of a watch.
-                self._check_cluster_id(response)
-                # Now force the data to be preloaded in order to trigger any
-                # IO-related errors in this method rather than when we try to
-                # access it later.
-                yield from response.read()
-                try:
-                    response = yield from self._handle_server_response(response)
-                except etcd.EtcdException as e:
-                    if "during rolling upgrades" in e.payload['message']:
-                        response = False
-                        some_request_failed = True
-                        continue
-                    raise
-                else:
-                    break
-
-
-            # earlier versions don't wrap socket errors
-            except (HTTPException, socket.error, DisconnectedError, ClientConnectionError,ClientResponseError) as e:
-                _log.exception("Request to server %s failed",
-                           self._base_uri)
-                if self._allow_reconnect:
-                    _log.info("Reconnection allowed, looking for another "
-                              "server.")
-                    # _next_server() raises EtcdException if there are no
-                    # machines left to try, breaking out of the loop.
-                    self._base_uri = self._next_server(cause=e)
-                    some_request_failed = True
-                else:
-                    _log.debug("Reconnection disabled, giving up.")
-                    raise etcd.EtcdConnectionFailed(
-                        "Connection to etcd failed") from e
-
-        if some_request_failed:
-            if not self._use_proxies:
-                # The cluster may have changed since last invocation
-                self._machines_cache = yield from self.machines()
-            self._machines_cache.remove(self._base_uri)
-        return response
+    @_wrap_request
+    def api_execute_json(self, path, method, params=None):
+        url = self._base_uri + path
+        json_payload = json.dumps(params)
+        headers = self._get_headers()
+        headers['Content-Type'] = 'application/json'
+        return self._client.request(method,
+                                    url,
+                                    body=json_payload,
+                                    allow_redirects=self.allow_redirect,
+                                    headers=headers,
+                                    preload_content=False)
 
     def _check_cluster_id(self, response):
         cluster_id = response.headers.get("x-etcd-cluster-id", None)
@@ -859,19 +866,19 @@ class Client(object):
                 'The UUID of the cluster changed from {} to '
                 '{}.'.format(old_expected_cluster_id, cluster_id))
 
-    @asyncio.coroutine
-    def _handle_server_response(self, response):
+    async def _handle_server_response(self, response):
         """ Handles the server response """
         if response.status in [200, 201]:
             return response
 
         else:
-            data = yield from response.read()
+            data = await response.read()
             resp = data.decode('utf-8')
 
             # throw the appropriate exception
             try:
                 r = json.loads(resp)
+                r['status'] = response.status
             except (TypeError, ValueError):
                 # Bad JSON, make a response locally.
                 r = {"message": "Bad response",

@@ -5,13 +5,13 @@ Priority: optional
 Build-Depends: python3-setuptools, python3-all, debhelper (>= 9),
   python3-pytest,
   python3-aiohttp,
-  etcd (>= 2.2),
+  python3-etcd (>= 0.4.3),
 Standards-Version: 3.9.1
 
-Package: python3-aioetcd
+Package: python3-aio-etcd
 Architecture: all
-Depends: ${misc:Depends}, ${python3:Depends}
-Recommends: etcd (>= 2.2)
+Depends: ${misc:Depends}, ${python3:Depends},
+  python3-etcd (>= 0.4.3),
 Description: Asynchronous python client for etcd
- This is an asyncio-compatible python client for Etcd (https://github.com/coreos/etcd).
+ This is an asyncio-compatible clone of the python3 interface for Etcd (https://github.com/coreos/etcd).
 

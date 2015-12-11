@@ -30,17 +30,15 @@ class Lock(object):
         """
         return self._uuid
 
-    @asyncio.coroutine
-    def set_uuid(self, value):
+    async def set_uuid(self, value):
         old_uuid = self._uuid
         self._uuid = value
-        if not (yield from self._find_lock()):
+        if not (await self._find_lock()):
             _log.warn("The hand-set uuid was not found, refusing")
             self._uuid = old_uuid
             raise ValueError("Nonexistent UUID")
 
-    @asyncio.coroutine
-    def is_acquired(self):
+    async def is_acquired(self):
         """
         tells us if the lock is acquired
         """
@@ -48,15 +46,14 @@ class Lock(object):
             _log.debug("Lock not taken")
             return False
         try:
-            yield from self.client.read(self.lock_key)
+            await self.client.read(self.lock_key)
             return True
         except aioetcd.EtcdKeyNotFound:
             _log.warn("Lock was supposedly taken, but we cannot find it")
             self.is_taken = False
             return False
 
-    @asyncio.coroutine
-    def acquire(self, blocking=True, lock_ttl=3600):
+    async def acquire(self, blocking=True, lock_ttl=3600):
         """
         Acquire the lock.
 
@@ -65,28 +62,27 @@ class Lock(object):
         :param timeout The time to wait before giving up on getting a lock
         """
         # First of all try to write, if our lock is not present.
-        if not (yield from self._find_lock()):
+        if not (await self._find_lock()):
             _log.debug("Lock not found, writing it to %s", self.path)
-            res = yield from self.client.write(self.path, self.uuid, ttl=lock_ttl, append=True)
+            res = await self.client.write(self.path, self.uuid, ttl=lock_ttl, append=True)
             self._set_sequence(res.key)
             _log.debug("Lock key %s written, sequence is %s", res.key, self._sequence)
         elif lock_ttl:
             # Renew our lock if already here!
-            yield from self.client.write(self.lock_key, self.uuid, ttl=lock_ttl)
+            await self.client.write(self.lock_key, self.uuid, ttl=lock_ttl)
 
         # now get the owner of the lock, and the next lowest sequence
         return self._acquired(blocking=blocking)
 
-    @asyncio.coroutine
-    def release(self):
+    async def release(self):
         """
         Release the lock
         """
         if not self._sequence:
-            yield from self._find_lock()
+            await self._find_lock()
         try:
             _log.debug("Releasing existing lock %s", self.lock_key)
-            yield from self.client.delete(self.lock_key)
+            await self.client.delete(self.lock_key)
         except aioetcd.EtcdKeyNotFound:
             _log.info("Lock %s not found, nothing to release", self.lock_key)
             pass
@@ -97,14 +93,13 @@ class Lock(object):
         """
         You can use the lock as a contextmanager
         """
-        yield from self.acquire(blocking=True, lock_ttl=0)
+        await self.acquire(blocking=True, lock_ttl=0)
 
     def __aexit__(self, type, value, traceback):
-        yield from self.release()
+        await self.release()
 
-    @asyncio.coroutine
-    def _acquired(self, blocking=True):
-        locker, nearest = yield from self._get_locker()
+    async def _acquired(self, blocking=True):
+        locker, nearest = await self._get_locker()
         self.is_taken = False
         if self.lock_key == locker:
             _log.debug("Lock acquired!")
@@ -120,12 +115,12 @@ class Lock(object):
             _log.debug("Lock not acquired, now watching %s", watch_key)
             while True:
                 try:
-                    r = yield from self.client.watch(watch_key)
+                    r = await self.client.watch(watch_key)
                     _log.debug("Detected variation for %s: %s", r.key, r.action)
-                    return (yield from self._acquired(blocking=True))
+                    return (await self._acquired(blocking=True))
                 except aioetcd.EtcdKeyNotFound:
                     _log.debug("Key %s not present anymore, moving on", watch_key)
-                    return (yield from self._acquired(blocking=True))
+                    return (await self._acquired(blocking=True))
                 except aioetcd.EtcdException:
                     # TODO: log something...
                     pass
@@ -139,18 +134,17 @@ class Lock(object):
     def _set_sequence(self, key):
         self._sequence = key.replace(self.path, '').lstrip('/')
 
-    @asyncio.coroutine
-    def _find_lock(self):
+    async def _find_lock(self):
         if self._sequence:
             try:
-                res = yield from self.client.read(self.lock_key)
+                res = await self.client.read(self.lock_key)
                 self._uuid = res.value
                 return True
             except aioetcd.EtcdKeyNotFound:
                 return False
         elif self._uuid:
             try:
-                for r in (yield from self.client.read(self.path, recursive=True)).leaves:
+                for r in (await self.client.read(self.path, recursive=True)).leaves:
                     if r.value == self._uuid:
                         self._set_sequence(r.key)
                         return True
@@ -158,12 +152,11 @@ class Lock(object):
                 pass
         return False
 
-    @asyncio.coroutine
-    def _get_locker(self):
+    async def _get_locker(self):
         results = [res for res in
-                   (yield from self.client.read(self.path, recursive=True)).leaves]
+                   (await self.client.read(self.path, recursive=True)).leaves]
         if not self._sequence:
-            yield from self._find_lock()
+            await self._find_lock()
         l = sorted([r.key for r in results])
         _log.debug("Lock keys found: %s", l)
         try:

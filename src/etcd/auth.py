@@ -1,376 +1,254 @@
 import json
 
 import logging
-
-from http.client import HTTPException
-import socket
-from aiohttp.errors import DisconnectedError,ClientConnectionError,ClientResponseError
-import asyncio
-
-from .client import Client
 import etcd
 
 _log = logging.getLogger(__name__)
 
 
-class AuthClient(Client):
-    """
-    Extended etcd client that supports authentication primitives added in 2.1.
-    """
+class EtcdAuthBase(object):
+    entity = 'example'
 
-    def __init__(self, *args, **kwargs):
-        super(AuthClient, self).__init__(*args, **kwargs)
+    def __init__(self, client, name):
+        self.client = client
+        self.name = name
+        self.uri = "{}/auth/{}s/{}".format(self.client.version_prefix,
+                                           self.entity, self.name)
 
-    @asyncio.coroutine
-    def create_user(self, username, password, roles=[], role_action='roles'):
-        """
-        Add a user.
+    async def get_names(self):
+        key = "{}s".format(self.entity)
+        uri = "{}/auth/{}".format(self.client.version_prefix, key)
+        response = await self.client.api_execute(uri, self.client._MGET)
+        return json.loads(response.data.decode('utf-8'))[key]
 
-        Args:
-            username (str): Username to create.
-            password (str): Password for username.
-            roles (list): List of roles as strings.
-
-        Returns:
-            EtcdUser
-
-        Raises:
-            etcd.EtcdException: If user can't be created.
-        """
+    async def read(self):
         try:
-            uri = self.version_prefix + '/auth/users/' + username
-            params = {'user': username}
-            if password:
-                params['password'] = password
-            if roles:
-                params[role_action] = roles
-
-            response = yield from self.json_api_execute(uri, self._MPUT, params=params)
-            return EtcdUser(self, response)
+            response = await self.client.api_execute(self.uri, self.client._MGET)
+        except etcd.EtcdInsufficientPermissions as e:
+            _log.error("Any action on the authorization requires the root role")
+            raise
+        except etcd.EtcdKeyNotFound:
+            _log.info("%s '%s' not found", self.entity, self.name)
+            raise
         except Exception as e:
-            _log.error("Failed to create user in %s%s: %r",
-                       self._base_uri, self.version_prefix, e)
-            raise # etcd.EtcdException("Could not create user") from e
+            _log.error("Failed to fetch %s in %s%s: %r",
+                       self.entity, self.client._base_uri,
+                       self.client.version_prefix, e)
+            raise etcd.EtcdException(
+                "Could not fetch {} '{}'".format(self.entity, self.name))
 
-    @asyncio.coroutine
-    def get_user(self, username):
-        """
-        Look up a user.
+        self._from_net(response.data)
 
-        Args:
-            username (str): Username to lookup.
-
-        Returns:
-            EtcdUser
-
-        Raises:
-            etcd.EtcdException: If user can't be found.
-        """
+    async def write(self):
         try:
-            uri = self.version_prefix + '/auth/users/' + username
-            response = yield from self.api_execute(uri, self._MGET)
-            res = json.loads((yield from response.read()).decode('utf-8'))
-            return EtcdUser(self, res)
-        except Exception as e:
-            _log.error("Failed to fetch user in %s%s: %r",
-                       self._base_uri, self.version_prefix, e)
-            raise # etcd.EtcdException("Could not fetch user") from e
-
-    @asyncio.coroutine
-    def usernames(self):
-        """List user names."""
+            r = self.__class__(self.client, self.name)
+            r.read()
+        except etcd.EtcdKeyNotFound:
+            r = None
         try:
-            uri = self.version_prefix + '/auth/users'
-            response = yield from self.api_execute(uri, self._MGET)
-            res = json.loads((yield from response.read()).decode('utf-8'))
-            return res['users']
+            for payload in self._to_net(r):
+                response = await self.client.api_execute_json(self.uri,
+                                                        self.client._MPUT,
+                                                        params=payload)
+                # This will fail if the response is an error
+                self._from_net(response.data)
+        except etcd.EtcdInsufficientPermissions as e:
+            _log.error("Any action on the authorization requires the root role")
+            raise
         except Exception as e:
-            _log.error("Failed to list users in %s%s: %r",
-                       self._base_uri, self.version_prefix, e)
-            raise etcd.EtcdException("Could not list users") from e
+            _log.error("Failed to write %s '%s'", self.entity, self.name)
+            # TODO: fine-grained exception handling
+            raise etcd.EtcdException(
+                "Could not write {} '{}': {}".format(self.entity,
+                                                     self.name, e))
 
-    @asyncio.coroutine
-    def users(self):
-        """List users in detail."""
-        res = []
-        for u in (yield from self.usernames()):
-            res.append((yield from self.get_user(u)))
-        return res
-
-    def create_role(self, role_name):
-        """
-        Create a role.
-
-        Args:
-            role_name (str): Name of role
-
-        Returns:
-            EtcdRole
-        """
-        return self.modify_role(role_name)
-    create_role._is_coroutine = True
-
-    @asyncio.coroutine
-    def get_role(self, role_name):
-        """
-        Look up a role.
-
-        Args:
-            role_name (str): Name of role.
-
-        Returns:
-            EtcdRole
-        """
+    async def delete(self):
         try:
-            uri = self.version_prefix + '/auth/roles/' + role_name
-            response = yield from self.api_execute(uri, self._MGET)
-            res = json.loads((yield from response.read()).decode('utf-8'))
-            return EtcdRole(self, res)
+            await self.client.api_execute(self.uri, self.client._MDELETE)
+        except etcd.EtcdInsufficientPermissions as e:
+            _log.error("Any action on the authorization requires the root role")
+            raise
+        except etcd.EtcdKeyNotFound:
+            _log.info("%s '%s' not found", self.entity, self.name)
+            raise
         except Exception as e:
-            _log.error("Failed to fetch user in %s%s: %r",
-                       self._base_uri, self.version_prefix, e)
-            raise etcd.EtcdException("Could not fetch users") from e
+            _log.error("Failed to delete %s in %s%s: %r",
+                       self.entity, self._base_uri, self.version_prefix, e)
+            raise etcd.EtcdException(
+                "Could not delete {} '{}'".format(self.entity, self.name))
 
-    @asyncio.coroutine
-    def role_names(self):
-        """List role names."""
-        try:
-            uri = self.version_prefix + '/auth/roles'
-            response = yield from self.api_execute(uri, self._MGET)
-            res = json.loads((yield from response.read()).decode('utf-8'))
-            return res['roles']
-        except Exception as e:
-            _log.error("Failed to list roles in %s%s: %r",
-                       self._base_uri, self.version_prefix, e)
-            raise etcd.EtcdException("Could not list roles") from e
+    def _from_net(self, data):
+        raise NotImplementedError()
 
-    @asyncio.coroutine
+    def _to_net(self, old=None):
+        raise NotImplementedError()
+
+    @classmethod
+    def new(cls, client, data):
+        c = cls(client, data[cls.entity])
+        c._from_net(data)
+        return c
+
+
+class EtcdUser(EtcdAuthBase):
+    """Class to manage in a orm-like way etcd users"""
+    entity = 'user'
+
+    def __init__(self, client, name):
+        super(EtcdUser, self).__init__(client, name)
+        self._roles = set()
+        self._password = None
+
+    def _from_net(self, data):
+        d = json.loads(data.decode('utf-8'))
+        self.roles = d.get('roles', [])
+        self.name = d.get('user')
+
+    def _to_net(self, prevobj=None):
+        if prevobj is None:
+            retval = [{"user": self.name, "password": self._password,
+                       "roles": list(self.roles)}]
+        else:
+            retval = []
+            if self._password:
+                retval.append({"user": self.name, "password": self._password})
+            to_grant = list(self.roles - prevobj.roles)
+            to_revoke = list(prevobj.roles - self.roles)
+            if to_grant:
+                retval.append({"user": self.name, "grant": to_grant})
+            if to_revoke:
+                retval.append({"user": self.name, "revoke": to_revoke})
+        # Let's blank the password now
+        # Even if the user can't be written we don't want it to leak anymore.
+        self._password = None
+        return retval
+
+    @property
     def roles(self):
-        """List roles in detail."""
-        return [self.get_role(x) for x in (yield from self.role_names())]
+        return self._roles
 
-    @asyncio.coroutine
-    def toggle_auth(self, auth_enabled=True):
-        """
-        Toggle authentication.
-
-        Args:
-            auth_enabled (bool): Should auth be enabled or disabled
-        """
-        try:
-            uri = self.version_prefix + '/auth/enable'
-            action = auth_enabled and self._MPUT or self._MDELETE
-
-            yield from self.api_execute(uri, action)
-        except Exception as e:
-            _log.error("Failed enable authentication in %s%s: %r",
-                       self._base_uri, self.version_prefix, e)
-            raise etcd.EtcdException("Could not toggle authentication") from e
-
-    @asyncio.coroutine
-    def modify_role(self, role_name, permissions=None, perm_key=None):
-        """Modifies role."""
-        try:
-            uri = self.version_prefix + '/auth/roles/' + role_name
-            params = {
-                'role': role_name,
-            }
-            if permissions:
-                params[perm_key] = {
-                    'kv': {
-                        'read': [k for k, v in permissions.items() if
-                                 'R' in v.upper()],
-                        'write': [k for k, v in permissions.items() if
-                                  'W' in v.upper()]
-                    }
-                }
-            response = yield from self.json_api_execute(uri, self._MPUT, params=params)
-            return EtcdRole(self, response)
-        except Exception as e:
-            _log.error("Failed to modify role in %s%s: %r",
-                       self._base_uri, self.version_prefix, e)
-            raise # etcd.EtcdException("Could not modify role") from e
-
-    @asyncio.coroutine
-    def json_api_execute(self, path, method, params=None):
-        """ Executes the query. """
-
-        some_request_failed = False
-        response = False
-
-        if not path.startswith('/'):
-            raise ValueError('Path does not start with /')
-
-        while not response:
-            try:
-                url = self._base_uri + path
-                json_payload = json.dumps(params)
-                headers = { 'Content-Type': 'application/json' }
-                response = yield from self._client.request(
-                    method,
-                    url,
-                    data=json_payload,
-                    params=params,
-                    headers=headers,
-                    auth=self._get_auth(),
-                    allow_redirects=self.allow_redirect,
-                    )
-
-            except (HTTPException,
-                    socket.error, DisconnectedError, ClientConnectionError,ClientResponseError) as e:
-                _log.exception("Request to server %s failed", self._base_uri)
-                if self._allow_reconnect:
-                    _log.info("Reconnection allowed, looking for another "
-                              "server.")
-                    # _next_server() raises EtcdException if there are no
-                    # machines left to try, breaking out of the loop.
-                    self._base_uri = self._next_server()
-                    some_request_failed = True
-                else:
-                    _log.debug("Reconnection disabled, giving up.")
-                    raise etcd.EtcdConnectionFailed("Connection to etcd failed") from e
-
-            else:
-                # Check the cluster ID hasn't changed under us.  We use
-                # preload_content=False above so we can read the headers
-                # before we wait for the content of a long poll.
-                cluster_id = response.headers.get("x-etcd-cluster-id", None)
-                id_changed = (self.expected_cluster_id
-                              and cluster_id is not None and
-                              cluster_id != self.expected_cluster_id)
-                # Update the ID so we only raise the exception once.
-                old_expected_cluster_id = self.expected_cluster_id
-                self.expected_cluster_id = cluster_id
-                if id_changed:
-                    # Defensive: clear the pool so that we connect afresh next
-                    # time.
-                    self._client.clear()
-                    raise etcd.EtcdClusterIdChanged(
-                        'The UUID of the cluster changed from {} to '
-                        '{}.'.format(old_expected_cluster_id, cluster_id))
-                try:
-                    response = yield from self._handle_server_response(response)
-                except etcd.EtcdException as e:
-                    if "during rolling upgrades" in e.payload['message']:
-                        response = False
-                        continue
-                    raise
-                else:
-                    break
-
-        if some_request_failed:
-            if not self._use_proxies:
-                # The cluster may have changed since last invocation
-                self._machines_cache = self.machines
-            self._machines_cache.remove(self._base_uri)
-
-        return json.loads((yield from response.read()).decode('utf-8'))
-
-
-class EtcdUser(object):
-    def __init__(self, auth_client, json_user):
-        self.client = auth_client
-        self.name = json_user.get('user')
-        self._roles = json_user.get('roles') or []
+    @roles.setter
+    def roles(self, val):
+        self._roles = set(val)
 
     @property
     def password(self):
         """Empty property for password."""
         return None
 
-    @asyncio.coroutine
-    def set_password(self, new_password):
+    @password.setter
+    def password(self, new_password):
         """Change user's password."""
-        yield from self.client.create_user(self.name, new_password)
+        self._password = new_password
 
-    @property
-    def roles(self):
-        return tuple(self._roles)
+    def __str__(self):
+        return json.dumps(self._to_net()[0])
 
-    @asyncio.coroutine
-    def set_roles(self, *roles):
-        if len(roles) == 1 and not isinstance(roles[0],str):
-            roles = roles[0]
-        existing_roles = set(self._roles)
-        new_roles = set(roles)
 
-        if existing_roles == new_roles:
-            _log.debug('User %s already belongs to %s', self.name, self._roles)
+
+class EtcdRole(EtcdAuthBase):
+    entity = 'role'
+
+    def __init__(self, client, name):
+        super(EtcdRole, self).__init__(client, name)
+        self._read_paths = set()
+        self._write_paths = set()
+
+    def _from_net(self, data):
+        d = json.loads(data.decode('utf-8'))
+        self.name = d.get('role')
+
+        try:
+            kv = d["permissions"]["kv"]
+        except:
+            self._read_paths = set()
+            self._write_paths = set()
             return
 
-        to_revoke = existing_roles - new_roles
-        to_grant = new_roles - existing_roles
+        self._read_paths = set(kv.get('read', []))
+        self._write_paths = set(kv.get('write', []))
 
-        if to_revoke:
-            yield from self.client.create_user(self.name, None, roles=list(to_revoke),
-                                    role_action='revoke')
-        if to_grant:
-            yield from self.client.create_user(self.name, None, roles=list(to_grant),
-                                    role_action='grant')
-        self._roles = new_roles
-
-
-class EtcdRole(object):
-    def __init__(self, auth_client, role_json):
-        self.client = auth_client
-        self.name = role_json.get('role')
-        self.permissions = RolePermissionsDict(self, role_json)
-
-
-class RolePermissionsDict(dict):
-    _PERMISSIONS = {'R', 'W'}
-
-    def __init__(self, etcd_role, role_json, *args, **kwargs):
-        super(RolePermissionsDict, self).__init__(*args, **kwargs)
-        self.role = etcd_role
-        permissions = role_json.get('permissions')
-        if permissions and 'kv' in permissions:
-            self.__add_permissions(permissions, 'read', 'R')
-            self.__add_permissions(permissions, 'write', 'W')
-
-    def __add_permissions(self, permissions, label, symbol):
-        if label in permissions['kv'] and permissions['kv'][label]:
-            for path in permissions['kv'][label]:
-                existing_perms = dict.get(self, path)
-                if existing_perms:
-                    dict.__setitem__(self, path,
-                                     existing_perms + symbol)
-                else:
-                    dict.__setitem__(self, path, symbol)
-
-    @asyncio.coroutine
-    def set(self, key, value):
-        if not value:
-            raise ValueError('Permissions may only be (R)ead or (W)ite')
-        perms = set(x.upper() for x in value)
-        if not perms <= RolePermissionsDict._PERMISSIONS:
-            raise ValueError('Permissions may only be (R)ead or (W)ite')
-
-        role_name = self.role.name
-        perm_dict = {key: value}
-        existing_value = dict.get(self, key)
-
-        if existing_value:
-            existing_perms = set(x.upper() for x in existing_value)
-            if perms != existing_perms:
-                to_grant = perms - existing_perms
-                to_revoke = existing_perms - perms
-
-                if to_revoke:
-                    perm_dict = {key: ''.join(to_revoke)}
-                    yield from self.role.client.modify_role(role_name, perm_dict, 'revoke')
-                if to_grant:
-                    perm_dict = {key: ''.join(to_grant)}
-                    yield from self.role.client.modify_role(role_name, perm_dict, 'grant')
-            else:
-                _log.debug('Permission %s=%s already granted', key, value)
+    def _to_net(self, prevobj=None):
+        retval = []
+        if prevobj is None:
+            retval.append({
+                "role": self.name,
+                "permissions":
+                {
+                    "kv":
+                    {
+                        "read": list(self._read_paths),
+                        "write": list(self._write_paths)
+                    }
+                }
+            })
         else:
-            yield from self.role.client.modify_role(role_name, perm_dict, 'grant')
+            to_grant = {
+                'read': list(self._read_paths - prevobj._read_paths),
+                'write': list(self._write_paths - prevobj._write_paths)
+            }
+            to_revoke = {
+                'read': list(prevobj._read_paths - self._read_paths),
+                'write': list(prevobj._write_paths - self._write_paths)
+            }
+            if [path for sublist in to_revoke.values() for path in sublist]:
+                retval.append({'role': self.name, 'revoke': {'kv': to_revoke}})
+            if [path for sublist in to_grant.values() for path in sublist]:
+                retval.append({'role': self.name, 'grant': {'kv': to_grant}})
+        return retval
 
-        dict.__setitem__(self, key, value)
+    def grant(self, path, permission):
+        if permission.upper().find('R') >= 0:
+            self._read_paths.add(path)
+        if permission.upper().find('W') >= 0:
+            self._write_paths.add(path)
 
-    @asyncio.coroutine
-    def delete(self, key):
-        yield from self.role.client.modify_role(self.role.name, {key: 'RW'}, 'revoke')
-        dict.__delitem__(self, key)
+    def revoke(self, path, permission):
+        if permission.upper().find('R') >= 0 and \
+           path in self._read_paths:
+            self._read_paths.remove(path)
+        if permission.upper().find('W') >= 0 and \
+           path in self._write_paths:
+            self._write_paths.remove(path)
 
+    @property
+    def acls(self):
+        perms = {}
+        try:
+            for path in self._read_paths:
+                perms[path] = 'R'
+            for path in self._write_paths:
+                if path in perms:
+                    perms[path] += 'W'
+                else:
+                    perms[path] = 'W'
+        except:
+            pass
+        return perms
+
+    async def get_acls(self):
+        return self.acls
+
+    async def set_acls(self, acls):
+        self._read_paths = set()
+        self._write_paths = set()
+        for path, permission in acls.items():
+            await self.grant(path, permission)
+
+    def __str__(self):
+        return json.dumps({"role": self.name, 'acls': self.acls})
+
+
+class Auth(object):
+    def __init__(self, client):
+        self.client = client
+        self.uri = "{}/auth/enable".format(self.client.version_prefix)
+
+    async def get_active(self):
+        resp = await self.client.api_execute(self.uri, self.client._MGET)
+        return json.loads(resp.data.decode('utf-8'))['enabled']
+
+    async def set_active(self, value):
+        if value != self.active:
+            method = value and self.client._MPUT or self.client._MDELETE
+            await self.client.api_execute(self.uri, method)
