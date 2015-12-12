@@ -10,6 +10,7 @@ before_install:
 install:
   - pip install coveralls
   - pip install coverage
+  - pip install OpenSSL
   - python bootstrap.py
   - bin/buildout
 
