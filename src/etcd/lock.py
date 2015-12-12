@@ -89,13 +89,13 @@ class Lock(object):
         finally:
             self.is_taken = False
 
-    def __aenter__(self):
+    async def __aenter__(self):
         """
         You can use the lock as a contextmanager
         """
         await self.acquire(blocking=True, lock_ttl=0)
 
-    def __aexit__(self, type, value, traceback):
+    async def __aexit__(self, type, value, traceback):
         await self.release()
 
     async def _acquired(self, blocking=True):
