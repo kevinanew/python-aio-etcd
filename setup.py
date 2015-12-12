@@ -9,6 +9,7 @@ NEWS = open(os.path.join(here, 'NEWS.txt')).read()
 version = '0.4.3'
 
 install_requires = [
+    'etcd',
     'aiohttp',
     'dnspython3',
 ]
@@ -52,9 +53,9 @@ setup(
     keywords='etcd raft distributed log api client',
     author='Matthias Urlichs',
     author_email='matthias@urlichs.de',
-    url='http://github.com/smurfix/aioetcd',
+    url='http://github.com/smurfix/aio-etcd',
     license='MIT',
-    packages=('aioetcd',),
+    packages=('aio_etcd',),
     include_package_data=True,
     zip_safe=False,
     install_requires=install_requires,
