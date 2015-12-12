@@ -215,6 +215,7 @@ class TestClusterFunctions(EtcdIntegrationTest):
         """ INTEGRATION: get key after the server we're connected fails. """
         self.processHelper.stop()
         self.processHelper.run(number=3)
+        yield from asyncio.sleep(0.2,loop=loop)
         client = aio_etcd.Client(port=6001, allow_reconnect=True, loop=loop)
         set_result = yield from client.set('/test_set', 'test-key1')
         get_result = yield from client.get('/test_set')
@@ -231,6 +232,7 @@ class TestClusterFunctions(EtcdIntegrationTest):
         """ INTEGRATION: receive several hosts at connection setup. """
         self.processHelper.stop()
         self.processHelper.run(number=3)
+        yield from asyncio.sleep(0.2,loop=loop)
         client = aio_etcd.Client(
             host=(
                 ('127.0.0.1', 6004),
@@ -266,6 +268,7 @@ class TestClusterFunctions(EtcdIntegrationTest):
         # Start with three instances (0, 1, 2)
         self.processHelper.run(number=3)
         # Connect to instance 0
+        yield from asyncio.sleep(0.2,loop=loop)
         client = aio_etcd.Client(port=6001, allow_reconnect=True, loop=loop)
         set_result = yield from client.set('/test_set', 'test-key1')
 
