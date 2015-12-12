@@ -30,7 +30,7 @@ class PyTest(TestCommand):
 
     def initialize_options(self):
         TestCommand.initialize_options(self)
-        self.pytest_args = ['--assert=plain']
+        self.pytest_args = ['--assert=plain','tests/']
 
 #    def finalize_options(self):
 #        TestCommand.finalize_options(self)
