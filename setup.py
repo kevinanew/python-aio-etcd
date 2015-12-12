@@ -7,8 +7,11 @@ here = os.path.abspath(os.path.dirname(__file__))
 README = open(os.path.join(here, 'README.rst')).read()
 NEWS = open(os.path.join(here, 'NEWS.txt')).read()
 
-
-version = '0.4.3'
+def get_version(fname='aio_etcd/__init__.py'):
+    with open(fname) as f:
+        for line in f:
+            if line.startswith('__VERSION__'):
+                return eval(line.split('=')[-1])
 
 install_requires = [
     'python-etcd',
@@ -42,7 +45,7 @@ class PyTest(TestCommand):
 
 setup(
     name='aio_etcd',
-    version=version,
+    version='.'.join(str(x) for x in get_version()),
     description="An asynchronous python client for etcd",
     long_description=README,
     classifiers=[
@@ -55,7 +58,7 @@ setup(
     keywords='etcd raft distributed log api client',
     author='Matthias Urlichs',
     author_email='matthias@urlichs.de',
-    url='http://github.com/smurfix/aio-etcd',
+    url='http://github.com/M-o-a-T/aio-etcd',
     license='MIT',
     packages=('aio_etcd',),
     include_package_data=True,

@@ -4,4 +4,15 @@
 # Wed, 11 Nov 2015 13:00:57 +0100
 export PYBUILD_NAME=aio_etcd
 %:
-	dh $@ --with python3 --buildsystem=pybuild
+	dh $@ --with python3,sphinxdoc --buildsystem=pybuild
+
+clean:
+	dh_testdir
+	dh_auto_clean
+	dh_clean
+
+override_dh_auto_build:
+	dh_auto_build
+	PYTHONPATH=. http_proxy='invalid:9' python3 /usr/bin/sphinx-build -N -bhtml docs-source/ .pybuild/docs/html
+	# port 9 is the "discard" port
+

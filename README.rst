@@ -45,11 +45,15 @@ Create a client object
     client = etcd.Client() # this will create a client against etcd server running on localhost on port 4001
     client = etcd.Client(port=4002)
     client = etcd.Client(host='127.0.0.1', port=4003)
-    client = etcd.Client(host='127.0.0.1', port=4003, allow_redirect=False) # wont let you run sensitive commands on non-leader machines, default is true
+    client = etcd.Client(host='127.0.0.1', port=4003, allow_redirect=False)
+    # wont let you run sensitive commands on non-leader machines, default is true
+
     # If you have defined a SRV record for _etcd._tcp.example.com pointing to the clients
     client = etcd.Client(srv_domain='example.com', protocol="https")
+
     # create a client against https://api.example.com:443/etcd
     client = etcd.Client(host='api.example.com', protocol='https', port=443, version_prefix='/etcd')
+
 Write a key
 ~~~~~~~~~
 
@@ -57,17 +61,26 @@ Write a key
 
     await client.write('/nodes/n1', 1)
     # with ttl
-    await client.write('/nodes/n2', 2, ttl=4)  # sets the ttl to 4 seconds
-    await client.set('/nodes/n2', 1) # Equivalent, for compatibility reasons.
+
+    await client.set('/nodes/n1', 1)
+    # Equivalent, for compatibility reasons.
+
+    await client.write('/nodes/n2', 2, ttl=4)
+    # sets the ttl to 4 seconds
 
 Read a key
 ~~~~~~~~~
 
 .. code:: python
 
-    await client.read('/nodes/n2').value
-    await client.read('/nodes', recursive = True) #get all the values of a directory, recursively.
-    await client.get('/nodes/n2').value
+    (await client.read('/nodes/n2')).value
+    # read a value
+
+    (await client.get('/nodes/n2')).value
+    # Equivalent, for compatibility reasons.
+
+    await client.read('/nodes', recursive = True)
+    # get all the values of a directory, recursively.
 
 Delete a key
 ~~~~~~~~~~~~
@@ -97,11 +110,13 @@ You can also atomically update a result:
 
 .. code:: python
 
+    await client.write('/foo','bar')
     result = await client.read('/foo')
     print(result.value) # bar
     result.value += u'bar'
     updated = await client.update(result)
-    # if any other client wrote '/foo' in the meantime this will fail
+    # if any other client wrote to '/foo' in the meantime this will fail
+
     print(updated.value) # barbar
 
 Watch a key
@@ -109,16 +124,25 @@ Watch a key
 
 .. code:: python
 
-    result = await client.read('/nodes/n1', wait = True) # will wait till the key is changed, and return once its changed
-    result = await client.read('/nodes/n1', wait = True, waitIndex = 10) # get all changes on this key starting from index 10
-    result = await client.watch('/nodes/n1') #equivalent to client.read('/nodes/n1', wait = True)
-    result = await client.watch('/nodes/n1', index = 10)
+    result = await client.read('/nodes/n1')
+    # start from a known initial value
+
+    result = await client.read('/nodes/n1', wait = True, waitIndex = result.modifiedIndex+1)
+    # will wait till the key is changed, and return once it's changed
+
+    result = await client.read('/nodes/n1', wait = True, waitIndex = 10)
+    # get all changes on this key starting from index 10
+
+    result = await client.watch('/nodes/n1')
+    # equivalent to client.read('/nodes/n1', wait = True)
+
+    result = await client.watch('/nodes/n1', index = result.modifiedIndex+1)
 
 If you want to time out the read() call, wrap it in `asyncio.wait_for`:
 
 .. code:: python
 
-    result = await asyncio.wait_for(client.read('/nodes/n1', wait = True), timeout=30)
+    result = await asyncio.wait_for(client.read('/nodes/n1', wait=True), timeout=30)
 
 Locking module
 ~~~~~~~~~~~~~~
@@ -126,26 +150,30 @@ Locking module
 .. code:: python
 
     # Initialize the lock object:
-    # NOTE: this does not acquire a lock yet
+    # NOTE: this does not acquire a lock
     from aio_etcd.lock import Lock
-
     client = etcd.Client()
     lock = Lock(client, 'my_lock_name')
 
     # Use the lock object:
-    await lock.acquire(blocking=True, # will block until the lock is acquired
-          lock_ttl=None) # lock will live until we release it
-    await lock.is_acquired()  #
-    await lock.acquire(lock_ttl=60) # renew a lock
+    await lock.acquire(blocking=True, lock_ttl=None)
+    # will block until the lock is acquired
+    # lock will live until we release it
+
+    await lock.is_acquired()
+    # returns True
+    # NOTE: This tells you that _somebody_ has the lock
+    await lock.acquire(lock_ttl=60)
+    # renew a lock
     await lock.release() # release an existing lock
     await lock.is_acquired()  # False
 
-    # The lock object may also be used as a context manager (Python 3.5):
+    # The lock object may also be used as a context manager:
     async with Lock(client, 'customer1') as my_lock:
         do_stuff()
-        await my_lock.is_acquired()  # True
-        await my_lock.acquire(lock_ttl = 60)
-    await my_lock.is_acquired() # False
+        await my_lock.is_acquired() # True
+        await my_lock.acquire(lock_ttl = 60) # renew
+    await my_lock.is_acquired() # probably False
 
 
 Get machines in the cluster
@@ -153,7 +181,7 @@ Get machines in the cluster
 
 .. code:: python
 
-    machiens = await client.machines()
+    machines = await client.machines()
 
 Get leader of the cluster
 ~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -169,6 +197,7 @@ Generate a sequential key in a directory
 
     x = await client.write("/dir/name", "value", append=True)
     print("generated key: " + x.key)
+    # actually the whole path
     print("stored value: " + x.value)
 
 List contents of a directory

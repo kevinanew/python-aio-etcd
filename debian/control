@@ -7,11 +7,29 @@ Build-Depends: python3-setuptools, python3-all, debhelper (>= 9),
   python3-aiohttp,
   python3-etcd (>= 0.4.3),
 Standards-Version: 3.9.1
+X-Python3-Version: >= 3.5
 
 Package: python3-aio-etcd
 Architecture: all
 Depends: ${misc:Depends}, ${python3:Depends},
   python3-etcd (>= 0.4.3),
-Description: Asynchronous python client for etcd
- This is an asyncio-compatible clone of the python3 interface for Etcd (https://github.com/coreos/etcd).
+Suggests: python-aio-etcd-doc
+Description: Full-featured asynchronous python client for etcd
+ aio_etcd is an asyncio-compatible clone of python-etcd,
+ a Python interface to Etcd (https://github.com/coreos/etcd).
+ .
+ The interface affords a full range of features, including
+ * watching for changes
+ * locking
+ * user management
+
+Package: python-aio-etcd-doc
+Architecture: all
+Section: doc
+Recommends: python3-aio-etcd
+Depends: ${sphinxdoc:Depends}, ${misc:Depends}
+Description: Asynchronous python client for etcd - documentation
+ aio_etcd is an asyncio-compatible clone of python-etcd, a Python interface to Etcd (https://github.com/coreos/etcd).
+ .
+ This is the documentation package.
 

@@ -1,0 +1,11 @@
+Format: http://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: python-aio-etcd
+Upstream-Contact: Matthias Urlichs <matthias@urlichs.de>
+Source: https://github.com/M-o-a-T/python-aio-etcd/
+
+Files: *
+Copyright: 2015, Matthias Urlichs
+      2013-2015, Jose Plana
+      2013-2015, Giuseppe Lavagetto
+License: MIT
+

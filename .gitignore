@@ -16,3 +16,4 @@ docs
 .coverage
 *.swp
 /.pybuild
+/test.log
