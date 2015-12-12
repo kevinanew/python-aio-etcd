@@ -1,3 +1,11 @@
+aio-etcd (0.4.3-1) unstable; urgency=medium
+
+  * Re-organized source (back to upstream, otherwise merging gets difficult)
+  * Merged to upstream 0.4.3
+  * Renamed to aio-etcd
+
+ -- Matthias Urlichs <matthias@urlichs.de>  Sat, 12 Dec 2015 09:21:31 +0100
+
 aioetcd (0.4.2+git7-4d8231afd-2) smurf; urgency=medium
 
   * Can't spell, not even my own name

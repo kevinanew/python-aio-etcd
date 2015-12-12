@@ -1,4 +1,4 @@
-Source: aioetcd
+Source: aio-etcd
 Maintainer: Matthias Urlichs <matthias@urlichs.de>
 Section: python
 Priority: optional
