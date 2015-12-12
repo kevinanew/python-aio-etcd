@@ -4,8 +4,8 @@ import tempfile
 
 import time
 
-import aioetcd as etcd
-import aioetcd.auth as auth
+import aio_etcd as etcd
+import aio_etcd.auth as auth
 from .test_simple import EtcdIntegrationTest
 from . import helpers
 

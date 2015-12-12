@@ -7,7 +7,7 @@ import tempfile
 import pytest
 
 import asyncio
-import aioetcd
+import aio_etcd
 from . import helpers
 
 log = logging.getLogger()
@@ -18,7 +18,7 @@ class EtcdIntegrationTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         program = cls._get_exe()
-        cls.directory = tempfile.mkdtemp(prefix='python-aioetcd')
+        cls.directory = tempfile.mkdtemp(prefix='python-aio_etcd')
         cls.processHelper = helpers.EtcdProcessHelper(
             cls.directory,
             proc_name=program,
@@ -49,7 +49,7 @@ class EtcdIntegrationTest(unittest.TestCase):
                 break
 
         if not program_path:
-            raise Exception('aioetcd not in path!!')
+            raise Exception('aio_etcd not in path!!')
 
         return program_path
 
@@ -59,24 +59,24 @@ class TestSimple(EtcdIntegrationTest):
     @helpers.run_async
     def test_machines(loop, self):
         """ INTEGRATION: retrieve machines """
-        client = aioetcd.Client(port=6001, loop=loop)
+        client = aio_etcd.Client(port=6001, loop=loop)
         self.assertEquals((yield from client.machines())[0], 'http://127.0.0.1:6001')
 
     @helpers.run_async
     def test_leader(loop, self):
         """ INTEGRATION: retrieve leader """
-        client = aioetcd.Client(port=6001, loop=loop)
+        client = aio_etcd.Client(port=6001, loop=loop)
         self.assertIn((yield from client.leader())['clientURLs'][0],
             ['http://127.0.0.1:6001','http://127.0.0.1:6002','http://127.0.0.1:6003'])
 
     @helpers.run_async
     def test_get_set_delete(loop, self):
         """ INTEGRATION: set a new value """
-        client = aioetcd.Client(port=6001, loop=loop)
+        client = aio_etcd.Client(port=6001, loop=loop)
         try:
             get_result = yield from client.get('/test_set')
             assert False
-        except aioetcd.EtcdKeyNotFound as e:
+        except aio_etcd.EtcdKeyNotFound as e:
             pass
 
         self.assertFalse((yield from client.contains('/test_set')))
@@ -102,13 +102,13 @@ class TestSimple(EtcdIntegrationTest):
         try:
             get_result = yield from client.get('/test_set')
             assert False
-        except aioetcd.EtcdKeyNotFound as e:
+        except aio_etcd.EtcdKeyNotFound as e:
             pass
 
     @helpers.run_async
     def test_update(loop, self):
         """INTEGRATION: update a value"""
-        client = aioetcd.Client(port=6001, loop=loop)
+        client = aio_etcd.Client(port=6001, loop=loop)
         yield from client.set('/foo', 3)
         c = yield from client.get('/foo')
         c.value = int(c.value) + 3
@@ -124,7 +124,7 @@ class TestSimple(EtcdIntegrationTest):
     @helpers.run_async
     def test_retrieve_subkeys(loop, self):
         """ INTEGRATION: retrieve multiple subkeys """
-        client = aioetcd.Client(port=6001, loop=loop)
+        client = aio_etcd.Client(port=6001, loop=loop)
         set_result = yield from client.write('/subtree/test_set', 'test-key1')
         set_result = yield from client.write('/subtree/test_set1', 'test-key2')
         set_result = yield from client.write('/subtree/test_set2', 'test-key3')
@@ -135,7 +135,7 @@ class TestSimple(EtcdIntegrationTest):
     @helpers.run_async
     def test_directory_ttl_update(loop, self):
         """ INTEGRATION: should be able to update a dir TTL """
-        client = aioetcd.Client(port=6001, loop=loop)
+        client = aio_etcd.Client(port=6001, loop=loop)
         yield from client.write('/dir', None, dir=True, ttl=30)
         res = yield from client.write('/dir', None, dir=True, ttl=31, prevExist=True)
         self.assertEquals(res.ttl, 31)
@@ -151,19 +151,19 @@ class TestErrors(EtcdIntegrationTest):
     @helpers.run_async
     def test_is_not_a_file(loop, self):
         """ INTEGRATION: try to write  value to an existing directory """
-        client = aioetcd.Client(port=6001, loop=loop)
+        client = aio_etcd.Client(port=6001, loop=loop)
 
         yield from client.set('/directory/test-key', 'test-value')
         try:
             yield from client.set('/directory', 'test-value')
             raise False
-        except aioetcd.EtcdNotFile:
+        except aio_etcd.EtcdNotFile:
             pass
 
     @helpers.run_async
     def test_test_and_set(loop, self):
         """ INTEGRATION: try test_and_set operation """
-        client = aioetcd.Client(port=6001, loop=loop)
+        client = aio_etcd.Client(port=6001, loop=loop)
 
         set_result = yield from client.set('/test-key', 'old-test-value')
 
@@ -182,18 +182,18 @@ class TestErrors(EtcdIntegrationTest):
     def test_creating_already_existing_directory(loop, self):
         """ INTEGRATION: creating an already existing directory without
         `prevExist=True` should fail """
-        client = aioetcd.Client(port=6001, loop=loop)
+        client = aio_etcd.Client(port=6001, loop=loop)
         yield from client.write('/mydir', None, dir=True)
 
         try:
             yield from client.write('/mydir', None, dir=True)
             assert False
-        except aioetcd.EtcdNotFile:
+        except aio_etcd.EtcdNotFile:
             pass
         try:
             yield from client.write('/mydir', None, dir=True, prevExist=False)
             assert False
-        except aioetcd.EtcdAlreadyExist:
+        except aio_etcd.EtcdAlreadyExist:
             pass
 
 
@@ -201,7 +201,7 @@ class TestClusterFunctions(EtcdIntegrationTest):
     @classmethod
     def setUpClass(cls):
         program = cls._get_exe()
-        cls.directory = tempfile.mkdtemp(prefix='python-aioetcd')
+        cls.directory = tempfile.mkdtemp(prefix='python-aio_etcd')
 
         cls.processHelper = helpers.EtcdProcessHelper(
             cls.directory,
@@ -215,7 +215,7 @@ class TestClusterFunctions(EtcdIntegrationTest):
         """ INTEGRATION: get key after the server we're connected fails. """
         self.processHelper.stop()
         self.processHelper.run(number=3)
-        client = aioetcd.Client(port=6001, allow_reconnect=True, loop=loop)
+        client = aio_etcd.Client(port=6001, allow_reconnect=True, loop=loop)
         set_result = yield from client.set('/test_set', 'test-key1')
         get_result = yield from client.get('/test_set')
 
@@ -231,7 +231,7 @@ class TestClusterFunctions(EtcdIntegrationTest):
         """ INTEGRATION: receive several hosts at connection setup. """
         self.processHelper.stop()
         self.processHelper.run(number=3)
-        client = aioetcd.Client(
+        client = aio_etcd.Client(
             host=(
                 ('127.0.0.1', 6004),
                 ('127.0.0.1', 6001)),
@@ -251,12 +251,12 @@ class TestClusterFunctions(EtcdIntegrationTest):
         """ INTEGRATION: fail on server kill if not allow_reconnect """
         self.processHelper.stop()
         self.processHelper.run(number=3)
-        client = aioetcd.Client(port=6001, allow_reconnect=False, loop=loop)
+        client = aio_etcd.Client(port=6001, allow_reconnect=False, loop=loop)
         self.processHelper.kill_one(0)
         try:
             yield from client.get('/test_set')
             assert False
-        except aioetcd.EtcdConnectionFailed:
+        except aio_etcd.EtcdConnectionFailed:
             pass
 
     @helpers.run_async
@@ -266,7 +266,7 @@ class TestClusterFunctions(EtcdIntegrationTest):
         # Start with three instances (0, 1, 2)
         self.processHelper.run(number=3)
         # Connect to instance 0
-        client = aioetcd.Client(port=6001, allow_reconnect=True, loop=loop)
+        client = aio_etcd.Client(port=6001, allow_reconnect=True, loop=loop)
         set_result = yield from client.set('/test_set', 'test-key1')
 
         get_result = yield from client.get('/test_set')
@@ -276,7 +276,7 @@ class TestClusterFunctions(EtcdIntegrationTest):
         self.processHelper.kill_one(0)
         try:
             yield from client.get('/test_set')
-        except aioetcd.EtcdException:
+        except aio_etcd.EtcdException:
             pass
 
 
@@ -286,19 +286,19 @@ class TestWatch(EtcdIntegrationTest):
     def test_watch(loop, self):
         """ INTEGRATION: Receive a watch event from other process """
 
-        client = aioetcd.Client(port=6001, allow_reconnect=True, loop=loop)
+        client = aio_etcd.Client(port=6001, allow_reconnect=True, loop=loop)
         set_result = yield from client.set('/test-key', 'test-value')
 
         queue = asyncio.Queue(loop=loop)
 
         @asyncio.coroutine
         def change_value(key, newValue):
-            c = aioetcd.Client(port=6001, loop=loop)
+            c = aio_etcd.Client(port=6001, loop=loop)
             yield from c.set(key, newValue)
 
         @asyncio.coroutine
         def watch_value(key, queue):
-            c = aioetcd.Client(port=6001, loop=loop)
+            c = aio_etcd.Client(port=6001, loop=loop)
             w = yield from c.watch(key)
             yield from queue.put(w.value)
 
@@ -316,7 +316,7 @@ class TestWatch(EtcdIntegrationTest):
     def test_watch_indexed(loop, self):
         """ INTEGRATION: Receive a watch event from other process, indexed """
 
-        client = aioetcd.Client(port=6001, allow_reconnect=True, loop=loop)
+        client = aio_etcd.Client(port=6001, allow_reconnect=True, loop=loop)
 
         set_result = yield from client.set('/test-key', 'test-value')
         set_result = yield from client.set('/test-key', 'test-value0')
@@ -328,13 +328,13 @@ class TestWatch(EtcdIntegrationTest):
 
         @asyncio.coroutine
         def change_value(key, newValue):
-            c = aioetcd.Client(port=6001, loop=loop)
+            c = aio_etcd.Client(port=6001, loop=loop)
             yield from c.set(key, newValue)
             yield from c.get(key)
 
         @asyncio.coroutine
         def watch_value(key, index, queue):
-            c = aioetcd.Client(port=6001, loop=loop)
+            c = aio_etcd.Client(port=6001, loop=loop)
             for i in range(0, 3):
                 yield from queue.put((yield from c.watch(key, index=index + i)).value)
 
@@ -355,7 +355,7 @@ class TestWatch(EtcdIntegrationTest):
     def test_watch_generator(loop, self):
         """ INTEGRATION: Receive a watch event from other process (gen) """
 
-        client = aioetcd.Client(port=6001, allow_reconnect=True, loop=loop)
+        client = aio_etcd.Client(port=6001, allow_reconnect=True, loop=loop)
         set_result = yield from client.set('/test-key', 'test-value')
 
         queue = asyncio.Queue(loop=loop)
@@ -363,14 +363,14 @@ class TestWatch(EtcdIntegrationTest):
         @asyncio.coroutine
         def change_value(key):
             yield from asyncio.sleep(0.5, loop=loop)
-            c = aioetcd.Client(port=6001, loop=loop)
+            c = aio_etcd.Client(port=6001, loop=loop)
             for i in range(0, 3):
                 yield from c.set(key, 'test-value%d' % i)
                 yield from c.get(key)
 
         @asyncio.coroutine
         def watch_value(key, queue):
-            c = aioetcd.Client(port=6001, loop=loop)
+            c = aio_etcd.Client(port=6001, loop=loop)
             n = 0
             @asyncio.coroutine
             def qput(event):
@@ -378,7 +378,7 @@ class TestWatch(EtcdIntegrationTest):
                 yield from queue.put(event.value)
                 n += 1
                 if n == 3:
-                    raise aioetcd.StopWatching
+                    raise aio_etcd.StopWatching
                 
             yield from c.eternal_watch(key, qput)
             assert n == 3, n
@@ -400,7 +400,7 @@ class TestWatch(EtcdIntegrationTest):
     def test_watch_indexed_generator(loop, self):
         """ INTEGRATION: Receive a watch event from other process, ixd, (2) """
 
-        client = aioetcd.Client(port=6001, allow_reconnect=True, loop=loop)
+        client = aio_etcd.Client(port=6001, allow_reconnect=True, loop=loop)
 
         set_result = yield from client.set('/test-key', 'test-value')
         set_result = yield from client.set('/test-key', 'test-value0')
@@ -412,12 +412,12 @@ class TestWatch(EtcdIntegrationTest):
 
         @asyncio.coroutine
         def change_value(key, newValue):
-            c = aioetcd.Client(port=6001, loop=loop)
+            c = aio_etcd.Client(port=6001, loop=loop)
             yield from c.set(key, newValue)
 
         @asyncio.coroutine
         def watch_value(key, index, queue):
-            c = aioetcd.Client(port=6001, loop=loop)
+            c = aio_etcd.Client(port=6001, loop=loop)
             n = 0
             @asyncio.coroutine
             def qput(v):
@@ -425,7 +425,7 @@ class TestWatch(EtcdIntegrationTest):
                 yield from queue.put(v.value)
                 n += 1
                 if n == 3:
-                    raise aioetcd.StopWatching
+                    raise aio_etcd.StopWatching
             yield from c.eternal_watch(key, qput, index=index)
             assert n == 3, n
 

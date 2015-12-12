@@ -127,7 +127,7 @@ Locking module
 
     # Initialize the lock object:
     # NOTE: this does not acquire a lock yet
-    from aioetcd.lock import Lock
+    from aio_etcd.lock import Lock
 
     client = etcd.Client()
     lock = Lock(client, 'my_lock_name')

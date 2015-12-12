@@ -8,7 +8,7 @@ import pytest
 import ssl
 
 import asyncio
-import aioetcd
+import aio_etcd
 from . import helpers
 from . import test_simple
 
@@ -19,7 +19,7 @@ class TestEncryptedAccess(test_simple.EtcdIntegrationTest):
     @classmethod
     def setUpClass(cls):
         program = cls._get_exe()
-        cls.directory = tempfile.mkdtemp(prefix='python-aioetcd')
+        cls.directory = tempfile.mkdtemp(prefix='python-aio_etcd')
 
         cls.ca_cert_path = os.path.join(cls.directory, 'ca.crt')
         ca_key_path = os.path.join(cls.directory, 'ca.key')
@@ -57,7 +57,7 @@ class TestEncryptedAccess(test_simple.EtcdIntegrationTest):
     def test_get_set_unauthenticated(loop, self):
         """ INTEGRATION: set/get a new value unauthenticated (http->https) """
 
-        client = aioetcd.Client(port=6001, loop=loop)
+        client = aio_etcd.Client(port=6001, loop=loop)
 
         # Since python 3 raises a MaxRetryError here, this gets caught in
         # different code blocks in python 2 and python 3, thus messages are
@@ -65,46 +65,46 @@ class TestEncryptedAccess(test_simple.EtcdIntegrationTest):
         try:
             yield from client.set('/test_set', 'test-key')
             raise False
-        except aioetcd.EtcdException:
+        except aio_etcd.EtcdException:
             pass
 
         try:
             yield from client.get('/test_set')
             assert False
-        except aioetcd.EtcdException:
+        except aio_etcd.EtcdException:
             pass
 
     @helpers.run_async
     def test_get_set_unauthenticated_missing_ca(loop, self):
         """ INTEGRATION: try unauthenticated w/out validation (https->https)"""
         # This doesn't work for now and will need further inspection
-        client = aioetcd.Client(protocol='https', port=6001, ssl_verify=ssl.CERT_NONE, loop=loop)
+        client = aio_etcd.Client(protocol='https', port=6001, ssl_verify=ssl.CERT_NONE, loop=loop)
         set_result = yield from client.set('/test_set', 'test-key')
         get_result = yield from client.get('/test_set')
 
     @helpers.run_async
     def test_get_set_unauthenticated_with_ca(loop, self):
         """ INTEGRATION: try unauthenticated with validation (https->https)"""
-        client = aioetcd.Client(
+        client = aio_etcd.Client(
             protocol='https', port=6001, ca_cert=self.ca2_cert_path, loop=loop)
 
         loop = asyncio.get_event_loop()
         try:
             yield from client.set('/test-set', 'test-key')
             assert False
-        except aioetcd.EtcdConnectionFailed:
+        except aio_etcd.EtcdConnectionFailed:
             pass
         try:
             yield from client.get('/test-set')
             assert False
-        except aioetcd.EtcdConnectionFailed:
+        except aio_etcd.EtcdConnectionFailed:
             pass
 
     @helpers.run_async
     def test_get_set_authenticated(loop, self):
         """ INTEGRATION: set/get a new value authenticated """
 
-        client = aioetcd.Client(
+        client = aio_etcd.Client(
             port=6001, protocol='https', ca_cert=self.ca_cert_path, loop=loop)
 
         set_result = yield from client.set('/test_set', 'test-key')
@@ -116,7 +116,7 @@ class TestClientAuthenticatedAccess(test_simple.EtcdIntegrationTest):
     @classmethod
     def setUpClass(cls):
         program = cls._get_exe()
-        cls.directory = tempfile.mkdtemp(prefix='python-aioetcd')
+        cls.directory = tempfile.mkdtemp(prefix='python-aio_etcd')
 
         cls.ca_cert_path = os.path.join(cls.directory, 'ca.crt')
         ca_key_path = os.path.join(cls.directory, 'ca.key')
@@ -167,18 +167,18 @@ class TestClientAuthenticatedAccess(test_simple.EtcdIntegrationTest):
     def test_get_set_unauthenticated(loop, self):
         """ INTEGRATION: set/get a new value unauthenticated (http->https) """
 
-        client = aioetcd.Client(port=6001, loop=loop)
+        client = aio_etcd.Client(port=6001, loop=loop)
 
         # See above for the reason of this change
         try:
             yield from client.set('/test_set', 'test-key')
             assert False
-        except aioetcd.EtcdException:
+        except aio_etcd.EtcdException:
             pass
         try:
             yield from client.get('/test_set')
             assert False
-        except aioetcd.EtcdException:
+        except aio_etcd.EtcdException:
             pass
 
     @helpers.run_async
@@ -188,7 +188,7 @@ class TestClientAuthenticatedAccess(test_simple.EtcdIntegrationTest):
         # Etcd cluster where this fails with the exact same code this
         # doesn't fail
 
-        client = aioetcd.Client(
+        client = aio_etcd.Client(
             port=6001,
             protocol='https',
             cert=self.client_all_cert,

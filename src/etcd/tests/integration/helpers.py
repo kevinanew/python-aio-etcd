@@ -27,7 +27,7 @@ class EtcdProcessHelper(object):
     def __init__(
             self,
             base_directory,
-            proc_name='aioetcd',
+            proc_name='aio_etcd',
             port_range_start=4001,
             internal_port_range_start=7001,
             cluster=False,
@@ -64,7 +64,7 @@ class EtcdProcessHelper(object):
         log = logging.getLogger()
         directory = tempfile.mkdtemp(
             dir=self.base_directory,
-            prefix='python-aioetcd.%d-' % slot)
+            prefix='python-aio_etcd.%d-' % slot)
 
         log.debug('Created directory %s' % directory)
         client = '%s127.0.0.1:%d' % (self.schema, self.port_range_start + slot)
@@ -104,7 +104,7 @@ class EtcdProcessHelper(object):
         data_dir, process = self.processes.pop(slot)
         process.kill()
         time.sleep(0.2)
-        log.debug('Killed aioetcd pid:%d', process.pid)
+        log.debug('Killed aio_etcd pid:%d', process.pid)
         shutil.rmtree(data_dir)
         log.debug('Removed directory %s' % data_dir)
 

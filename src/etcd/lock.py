@@ -1,5 +1,5 @@
 import logging
-import aioetcd
+import aio_etcd
 import uuid
 import asyncio
 
@@ -48,7 +48,7 @@ class Lock(object):
         try:
             await self.client.read(self.lock_key)
             return True
-        except aioetcd.EtcdKeyNotFound:
+        except aio_etcd.EtcdKeyNotFound:
             _log.warn("Lock was supposedly taken, but we cannot find it")
             self.is_taken = False
             return False
@@ -83,7 +83,7 @@ class Lock(object):
         try:
             _log.debug("Releasing existing lock %s", self.lock_key)
             await self.client.delete(self.lock_key)
-        except aioetcd.EtcdKeyNotFound:
+        except aio_etcd.EtcdKeyNotFound:
             _log.info("Lock %s not found, nothing to release", self.lock_key)
             pass
         finally:
@@ -118,10 +118,10 @@ class Lock(object):
                     r = await self.client.watch(watch_key)
                     _log.debug("Detected variation for %s: %s", r.key, r.action)
                     return (await self._acquired(blocking=True))
-                except aioetcd.EtcdKeyNotFound:
+                except aio_etcd.EtcdKeyNotFound:
                     _log.debug("Key %s not present anymore, moving on", watch_key)
                     return (await self._acquired(blocking=True))
-                except aioetcd.EtcdException:
+                except aio_etcd.EtcdException:
                     # TODO: log something...
                     pass
 
@@ -140,7 +140,7 @@ class Lock(object):
                 res = await self.client.read(self.lock_key)
                 self._uuid = res.value
                 return True
-            except aioetcd.EtcdKeyNotFound:
+            except aio_etcd.EtcdKeyNotFound:
                 return False
         elif self._uuid:
             try:
@@ -148,7 +148,7 @@ class Lock(object):
                     if r.value == self._uuid:
                         self._set_sequence(r.key)
                         return True
-            except aioetcd.EtcdKeyNotFound:
+            except aio_etcd.EtcdKeyNotFound:
                 pass
         return False
 
@@ -170,4 +170,4 @@ class Lock(object):
         except ValueError as exc:
             # Something very wrong is going on, most probably
             # our lock has expired
-            raise aioetcd.EtcdLockExpired(u"Lock not found") from exc
+            raise aio_etcd.EtcdLockExpired(u"Lock not found") from exc

@@ -1,5 +1,5 @@
 """
-.. module:: python-aioetcd
+.. module:: python-aio_etcd
    :synopsis: An asynchronus python etcd client.
 
 .. moduleauthor:: Jose Plana <jplana@gmail.com>
@@ -16,7 +16,7 @@ import aiohttp
 import json
 import ssl
 import dns.resolver
-import aioetcd as etcd
+import aio_etcd as etcd
 import asyncio
 from functools import wraps
 
@@ -453,13 +453,13 @@ class Client(object):
         """
         Updates the value for a key atomically. Typical usage would be:
 
-        c = aioetcd.Client()
+        c = aio_etcd.Client()
         o = await c.read("/somekey")
         o.value += 1
         await c.update(o)
 
         Args:
-            obj (aioetcd.EtcdResult):  The object that needs updating.
+            obj (aio_etcd.EtcdResult):  The object that needs updating.
 
         This method returns a coroutine.
         """
