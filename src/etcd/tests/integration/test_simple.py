@@ -66,7 +66,8 @@ class TestSimple(EtcdIntegrationTest):
     def test_leader(loop, self):
         """ INTEGRATION: retrieve leader """
         client = aioetcd.Client(port=6001, loop=loop)
-        self.assertEquals((yield from client.leader())['clientURLs'], ['http://127.0.0.1:6001'])
+        self.assertIn((yield from client.leader())['clientURLs'][0],
+            ['http://127.0.0.1:6001','http://127.0.0.1:6002','http://127.0.0.1:6003'])
 
     @helpers.run_async
     def test_get_set_delete(loop, self):
