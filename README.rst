@@ -1,15 +1,15 @@
-python-etcd documentation
-=========================
+python-aio-etcd documentation
+=============================
 
 A python client for Etcd https://github.com/coreos/etcd
 
 Official documentation: http://python-aio-etcd.readthedocs.org/
 
-.. image:: https://travis-ci.org/jplana/python-etcd.png?branch=master
-   :target: https://travis-ci.org/jplana/python-etcd
+.. image:: https://travis-ci.org/M-o-a-T/python-aio-etcd.png?branch=master
+   :target: https://travis-ci.org/M-o-a-T/python-aio-etcd
 
-.. image:: https://coveralls.io/repos/jplana/python-etcd/badge.svg?branch=master&service=github
-   :target: https://coveralls.io/github/jplana/python-etcd?branch=master
+.. image:: https://coveralls.io/repos/M-o-a-T/python-aio-etcd/badge.svg?branch=master&service=github
+   :target: https://coveralls.io/github/M-o-a-T/python-aio-etcd?branch=master
 
 Installation
 ------------
@@ -17,9 +17,9 @@ Installation
 Pre-requirements
 ~~~~~~~~~~~~~~~~
 
-Install etcd (2.0.1 or later). This version of python-aioetcd will only work correctly with the version 2.0.x or later.
+Install etcd (2.0.1 or later). This version of python-aio-etcd will only work correctly with the version 2.0.x or later.
 
-This client is known to work with python 3.4 or above. It is not tested or expected to work in more outdated versions of python.
+This client is known to work with python 3.5. It will not work in older versions of python due to ist use of "async def" syntax.
 
 Python 2 is not supported.
 
@@ -55,45 +55,53 @@ Write a key
 
 .. code:: python
 
-    yield from client.write('/nodes/n1', 1)
+    await client.write('/nodes/n1', 1)
     # with ttl
-    yield from client.write('/nodes/n2', 2, ttl=4)  # sets the ttl to 4 seconds
-    yield from client.set('/nodes/n2', 1) # Equivalent, for compatibility reasons.
+    await client.write('/nodes/n2', 2, ttl=4)  # sets the ttl to 4 seconds
+    await client.set('/nodes/n2', 1) # Equivalent, for compatibility reasons.
 
 Read a key
 ~~~~~~~~~
 
 .. code:: python
 
-    yield from client.read('/nodes/n2').value
-    yield from client.read('/nodes', recursive = True) #get all the values of a directory, recursively.
-    yield from client.get('/nodes/n2').value
+    await client.read('/nodes/n2').value
+    await client.read('/nodes', recursive = True) #get all the values of a directory, recursively.
+    await client.get('/nodes/n2').value
 
 Delete a key
 ~~~~~~~~~~~~
 
 .. code:: python
 
-    yield from client.delete('/nodes/n1')
+    await client.delete('/nodes/n1')
 
 Atomic Compare and Swap
 ~~~~~~~~~~~~
 
 .. code:: python
 
-    yield from client.write('/nodes/n2', 2, prevValue = 4) # will set /nodes/n2 's value to 2 only if its previous value was 4 and
-    yield from client.write('/nodes/n2', 2, prevExist = False) # will set /nodes/n2 's value to 2 only if the key did not exist before
-    yield from client.write('/nodes/n2', 2, prevIndex = 30) # will set /nodes/n2 's value to 2 only if the key was last modified at index 30
-    yield from client.test_and_set('/nodes/n2', 2, 4) #equivalent to client.write('/nodes/n2', 2, prevValue = 4)
+    await client.write('/nodes/n2', 2, prevValue = 4)
+    # will set /nodes/n2 's value to 2 only if its previous value was 4
+
+    await client.write('/nodes/n2', 2, prevExist = False)
+    # will set /nodes/n2 's value to 2 only if the key did not exist before
+
+    await client.write('/nodes/n2', 2, prevIndex = 30)
+    # will set /nodes/n2 's value to 2 only if the key was last modified at index 30
+
+    await client.test_and_set('/nodes/n2', 2, 4)
+    #equivalent to client.write('/nodes/n2', 2, prevValue = 4)
 
 You can also atomically update a result:
 
 .. code:: python
 
-    result = yield from client.read('/foo')
+    result = await client.read('/foo')
     print(result.value) # bar
     result.value += u'bar'
-    updated = yield from client.update(result) # if any other client wrote '/foo' in the meantime this will fail
+    updated = await client.update(result)
+    # if any other client wrote '/foo' in the meantime this will fail
     print(updated.value) # barbar
 
 Watch a key
@@ -101,16 +109,16 @@ Watch a key
 
 .. code:: python
 
-    result = yield from client.read('/nodes/n1', wait = True) # will wait till the key is changed, and return once its changed
-    result = yield from client.read('/nodes/n1', wait = True, waitIndex = 10) # get all changes on this key starting from index 10
-    result = yield from client.watch('/nodes/n1') #equivalent to client.read('/nodes/n1', wait = True)
-    result = yield from client.watch('/nodes/n1', index = 10)
+    result = await client.read('/nodes/n1', wait = True) # will wait till the key is changed, and return once its changed
+    result = await client.read('/nodes/n1', wait = True, waitIndex = 10) # get all changes on this key starting from index 10
+    result = await client.watch('/nodes/n1') #equivalent to client.read('/nodes/n1', wait = True)
+    result = await client.watch('/nodes/n1', index = 10)
 
 If you want to time out the read() call, wrap it in `asyncio.wait_for`:
 
 .. code:: python
 
-    result = yield from asyncio.wait_for(client.read('/nodes/n1', wait = True), timeout=30)
+    result = await asyncio.wait_for(client.read('/nodes/n1', wait = True), timeout=30)
 
 Locking module
 ~~~~~~~~~~~~~~
@@ -125,12 +133,12 @@ Locking module
     lock = Lock(client, 'my_lock_name')
 
     # Use the lock object:
-    yield from lock.acquire(blocking=True, # will block until the lock is acquired
+    await lock.acquire(blocking=True, # will block until the lock is acquired
           lock_ttl=None) # lock will live until we release it
-    yield from lock.is_acquired()  #
-    yield from lock.acquire(lock_ttl=60) # renew a lock
-    yield from lock.release() # release an existing lock
-    yield from lock.is_acquired()  # False
+    await lock.is_acquired()  #
+    await lock.acquire(lock_ttl=60) # renew a lock
+    await lock.release() # release an existing lock
+    await lock.is_acquired()  # False
 
     # The lock object may also be used as a context manager (Python 3.5):
     async with Lock(client, 'customer1') as my_lock:
@@ -145,21 +153,21 @@ Get machines in the cluster
 
 .. code:: python
 
-    machiens = yield from client.machines()
+    machiens = await client.machines()
 
 Get leader of the cluster
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code:: python
 
-    leaderinfo = yield from client.leader()
+    leaderinfo = await client.leader()
 
 Generate a sequential key in a directory
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code:: python
 
-    x = yield from client.write("/dir/name", "value", append=True)
+    x = await client.write("/dir/name", "value", append=True)
     print("generated key: " + x.key)
     print("stored value: " + x.value)
 
@@ -169,33 +177,32 @@ List contents of a directory
 .. code:: python
 
     #stick a couple values in the directory
-    yield from client.write("/dir/name", "value1", append=True)
-    yield from client.write("/dir/name", "value2", append=True)
+    await client.write("/dir/name", "value1", append=True)
+    await client.write("/dir/name", "value2", append=True)
 
-    directory = yield from client.get("/dir/name")
+    directory = await client.get("/dir/name")
 
-    # loop through directory children
+    # loop through a directory's children
     for result in directory.children:
-      print(result.key + ": " + result.value)
+        print(result.key + ": " + result.value)
 
     # or just get the first child value
-    print(directory.children.next().value)
+    print(directory.next(children).value)
 
 Development setup
 -----------------
 
-To create a buildout,
+The usual setuptools commands are available.
 
 .. code:: bash
 
-    $ python bootstrap.py
-    $ bin/buildout
+    $ python3 setup.py install
 
-to test you should have etcd available in your system path:
+To test, you should have etcd available in your system path:
 
 .. code:: bash
 
-    $ bin/test
+    $ python3 setup.py test
 
 to generate documentation,
 
@@ -213,3 +220,4 @@ To make a release
     2) Run 'python setup.py sdist'
     3) Test the generated source distribution in dist/
     4) Upload to PyPI: 'python setup.py sdist register upload'
+
