@@ -41,7 +41,7 @@ class PyTest(TestCommand):
         sys.exit(errno)
 
 setup(
-    name='aioetcd',
+    name='aio_etcd',
     version=version,
     description="An asynchronous python client for etcd",
     long_description=README,

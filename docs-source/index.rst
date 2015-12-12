@@ -31,7 +31,7 @@ Create a client object
 
 .. code-block:: python
 
-   import aioetcd as etcd
+   import aio_etcd as etcd
 
    client = etcd.Client() # this will create a client against etcd server running on localhost on port 4001
    client = etcd.Client(port=4002)
@@ -48,28 +48,28 @@ Set a key
 
 .. code-block:: python
 
-    yield from client.write('/nodes/n1', 1)
+    await client.write('/nodes/n1', 1)
     # with ttl
-    yield from client.write('/nodes/n2', 2, ttl=4)  # sets the ttl to 4 seconds
+    await client.write('/nodes/n2', 2, ttl=4)  # sets the ttl to 4 seconds
     # create only
-    yield from client.write('/nodes/n3', 'test', prevExist=False)
+    await client.write('/nodes/n3', 'test', prevExist=False)
     # Compare and swap values atomically
-    yield from client.write('/nodes/n3', 'test2', prevValue='test1') #this fails to write
-    yield from client.write('/nodes/n3', 'test2', prevIndex=10) #this fails to write
+    await client.write('/nodes/n3', 'test2', prevValue='test1') #this fails to write
+    await client.write('/nodes/n3', 'test2', prevIndex=10) #this fails to write
     # mkdir
-    yield from client.write('/nodes/queue', dir=True)
+    await client.write('/nodes/queue', dir=True)
     # Append a value to a queue dir
-    yield from client.write('/nodes/queue', 'test', append=True) #will write i.e. /nodes/queue/11
-    yield from client.write('/nodes/queue', 'test2', append=True) #will write i.e. /nodes/queue/12
+    await client.write('/nodes/queue', 'test', append=True) #will write i.e. /nodes/queue/11
+    await client.write('/nodes/queue', 'test2', append=True) #will write i.e. /nodes/queue/12
 
 You can also atomically update a result:
 
 .. code:: python
 
-    result = yield from client.read('/foo')
+    result = await client.read('/foo')
     print(result.value) # bar
     result.value += u'bar'
-    updated = yield from client.update(result) # if any other client wrote '/foo' in the meantime this will fail
+    updated = await client.update(result) # if any other client wrote '/foo' in the meantime this will fail
     print(updated.value) # barbar
 
 
@@ -79,14 +79,14 @@ Get a key
 
 .. code-block:: python
 
-    (yield from client.read('/nodes/n2')).value
+    (await client.read('/nodes/n2')).value
     #recursively read a directory
-    r = yield from client.read('/nodes', recursive=True, sorted=True)
+    r = await client.read('/nodes', recursive=True, sorted=True)
     for child in r.children:
         print("%s: %s" % (child.key,child.value))
 
-    yield from client.read('/nodes/n2', wait=True) #Waits for a change in value in the key before returning.
-    yield from client.read('/nodes/n2', wait=True, waitIndex=10)
+    await client.read('/nodes/n2', wait=True) #Waits for a change in value in the key before returning.
+    await client.read('/nodes/n2', wait=True, waitIndex=10)
 
 
 
@@ -95,9 +95,9 @@ Delete a key
 
 .. code-block:: python
 
-    yield from client.delete('/nodes/n1')
-    yield from client.delete('/nodes', dir=True) #spits an error if dir is not empty
-    yield from client.delete('/nodes', recursive=True) #this works recursively
+    await client.delete('/nodes/n1')
+    await client.delete('/nodes', dir=True) #spits an error if dir is not empty
+    await client.delete('/nodes', recursive=True) #this works recursively
 
 
 
@@ -109,16 +109,16 @@ Use lock primitives
 
     # Initialize the lock object:
     # NOTE: this does not acquire a lock yet
-    from aioetcd.lock import Lock
+    from aio_etcd.lock import Lock
     client = etcd.Client()
     lock = Lock(client, '/customer1')
 
     # Use the lock object:
-    yield from lock.acquire(lock_ttl=60)
-    state = yield from lock.is_locked()  # True
-    yield from lock.renew(60)
-    yield from lock.release()
-    state = yield from lock.is_locked()  # False
+    await lock.acquire(lock_ttl=60)
+    state = await lock.is_locked()  # True
+    await lock.renew(60)
+    await lock.release()
+    state = await lock.is_locked()  # False
 
     # The lock object may also be used as a context manager:
     # (Python 3.5+)
@@ -128,7 +128,7 @@ Use lock primitives
         do_stuff()
         state = await lock.is_locked()  # True
         await lock.renew(60)
-    state = yield from lock.is_locked()  # False
+    state = await lock.is_locked()  # False
 
 
 Get machines in the cluster
@@ -136,7 +136,7 @@ Get machines in the cluster
 
 .. code-block:: python
 
-    machines = yield from client.machines()
+    machines = await client.machines()
 
 
 Get leader of the cluster
@@ -144,7 +144,7 @@ Get leader of the cluster
 
 .. code-block:: python
 
-    leader_info = yield from client.leader()
+    leader_info = await client.leader()
 
 
 Development setup
