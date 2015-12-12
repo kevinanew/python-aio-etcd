@@ -772,6 +772,9 @@ class Client(object):
             if not path.startswith('/'):
                 raise ValueError('Path does not start with /')
 
+            if not self._machines_available:
+                await self._update_machines()
+
             while not response:
                 try:
                     response = await payload(self, path, method, params=params)
@@ -782,10 +785,10 @@ class Client(object):
                     # Now force the data to be preloaded in order to trigger any
                     # IO-related errors in this method rather than when we try to
                     # access it later.
-                    _ = response.data
+                    _ = await response.read()
                     # urllib3 doesn't wrap all httplib exceptions and earlier versions
                     # don't wrap socket errors either.
-                except (HTTPException, socket.error) as e:
+                except (ClientResponseError, DisconnectedError, HTTPException, socket.error) as e:
                     _log.error("Request to server %s failed: %r",
                                self._base_uri, e)
                     if self._allow_reconnect:
@@ -812,13 +815,23 @@ class Client(object):
                 except:
                     _log.exception("Unexpected request failure, re-raising.")
                     raise
+                else:
+                    try:
+                        response = await self._handle_server_response(response)
+                    except etcd.EtcdException as e:
+                        if "during rolling upgrades" in e.payload['message']:
+                            response = False
+                            some_request_failed = True
+                        else:
+                            raise
 
                 if some_request_failed:
                     if not self._use_proxies:
                         # The cluster may have changed since last invocation
-                        self._machines_cache = self.machines
-                    self._machines_cache.remove(self._base_uri)
-            return self._handle_server_response(response)
+                        self._machines_cache = await self.machines()
+                    if self._base_uri in self._machines_cache:
+                        self._machines_cache.remove(self._base_uri)
+            return response
         return wrapper
 
     @_wrap_request
@@ -827,6 +840,8 @@ class Client(object):
 
         if not path.startswith('/'):
             raise ValueError('Path does not start with /')
+
+        url = self._base_uri + path
 
         return self._client.request(
             method,
@@ -840,19 +855,18 @@ class Client(object):
     def api_execute_json(self, path, method, params=None):
         url = self._base_uri + path
         json_payload = json.dumps(params)
-        headers = self._get_headers()
-        headers['Content-Type'] = 'application/json'
+        headers = { 'Content-Type': 'application/json' }
         return self._client.request(method,
                                     url,
-                                    body=json_payload,
+                                    data=json_payload,
                                     allow_redirects=self.allow_redirect,
-                                    headers=headers,
-                                    preload_content=False)
+                                    auth=self._get_auth(),
+                                    headers=headers)
 
     def _check_cluster_id(self, response):
         cluster_id = response.headers.get("x-etcd-cluster-id", None)
         if not cluster_id:
-            _log.warning("etcd response did not contain a cluster ID")
+            # _log.warning("etcd response did not contain a cluster ID")
             return
         id_changed = (self.expected_cluster_id and
                       cluster_id != self.expected_cluster_id)

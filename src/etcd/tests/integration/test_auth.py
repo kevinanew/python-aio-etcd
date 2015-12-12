@@ -1,47 +1,57 @@
-from etcd.tests.integration.test_simple import EtcdIntegrationTest
-from etcd import auth
-import etcd
+from .test_simple import EtcdIntegrationTest
+from aio_etcd import auth
+import aio_etcd as etcd
+from . import helpers
 
+import asyncio
+from pytest import raises
 
 class TestEtcdAuthBase(EtcdIntegrationTest):
     cl_size = 1
 
     def setUp(self):
         # Sets up the root user, toggles auth
+        loop = asyncio.get_event_loop()
+        self.client = etcd.Client(port=6001, loop=loop)
+
         u = auth.EtcdUser(self.client, 'root')
         u.password = 'testpass'
-        u.write()
+        loop.run_until_complete(u.write())
         self.client = etcd.Client(port=6001, username='root',
-                                password='testpass')
-        self.unauth_client = etcd.Client(port=6001)
+                                password='testpass', loop=loop)
+        self.unauth_client = etcd.Client(port=6001, loop=loop)
         a = auth.Auth(self.client)
-        a.active = True
+        loop.run_until_complete(a.set_active(True))
 
     def tearDown(self):
+        loop = asyncio.get_event_loop()
+
         u = auth.EtcdUser(self.client, 'test_user')
         r = auth.EtcdRole(self.client, 'test_role')
         try:
-            u.delete()
+            loop.run_until_complete(u.delete())
         except:
             pass
         try:
-            r.delete()
+            loop.run_until_complete(r.delete())
         except:
             pass
         a = auth.Auth(self.client)
-        a.active = False
+        loop.run_until_complete(a.set_active(False))
 
 
 class EtcdUserTest(TestEtcdAuthBase):
-    def test_names(self):
+    @helpers.run_async
+    def test_names(loop,self):
         u = auth.EtcdUser(self.client, 'test_user')
-        self.assertEquals(u.names, ['root'])
+        self.assertEquals((yield from u.get_names()), ['root'])
 
-    def test_read(self):
+    @helpers.run_async
+    def test_read(loop,self):
         u = auth.EtcdUser(self.client, 'root')
         # Reading an existing user succeeds
         try:
-            u.read()
+            yield from u.read()
         except Exception:
             self.fail("reading the root user raised an exception")
 
@@ -54,18 +64,22 @@ class EtcdUserTest(TestEtcdAuthBase):
 
         # An inexistent user raises the appropriate exception
         u = auth.EtcdUser(self.client, 'user.does.not.exist')
-        self.assertRaises(etcd.EtcdKeyNotFound, u.read)
+        with raises(etcd.EtcdKeyNotFound):
+            yield from u.read()
 
         # Reading with an unauthenticated client raises an exception
         u = auth.EtcdUser(self.unauth_client, 'root')
-        self.assertRaises(etcd.EtcdInsufficientPermissions, u.read)
+        with raises(etcd.EtcdInsufficientPermissions):
+            yield from u.read()
 
         # Generic errors are caught
         c = etcd.Client(port=9999)
         u = auth.EtcdUser(c, 'root')
-        self.assertRaises(etcd.EtcdException, u.read)
+        with raises(etcd.EtcdException):
+            yield from u.read()
 
-    def test_write_and_delete(self):
+    @helpers.run_async
+    def test_write_and_delete(loop,self):
         # Create an user
         u = auth.EtcdUser(self.client, 'test_user')
         u.roles.add('guest')
@@ -73,19 +87,19 @@ class EtcdUserTest(TestEtcdAuthBase):
         # directly from my suitcase
         u.password = '123456'
         try:
-            u.write()
+            yield from u.write()
         except:
             self.fail("creating a user doesn't work")
         # Password gets wiped
         self.assertEquals(u.password, None)
-        u.read()
+        yield from u.read()
         # Verify we can log in as this user and access the auth (it has the
         # root role)
         cl = etcd.Client(port=6001, username='test_user',
                          password='123456')
         ul = auth.EtcdUser(cl, 'root')
         try:
-            ul.read()
+            yield from ul.read()
         except etcd.EtcdInsufficientPermissions:
             self.fail("Reading auth with the new user is not possible")
 
@@ -94,36 +108,42 @@ class EtcdUserTest(TestEtcdAuthBase):
         # set roles as a list, it works!
         u.roles = ['guest', 'test_group']
         try:
-            u.write()
+            yield from u.write()
         except:
             self.fail("updating a user you previously created fails")
-        u.read()
+        yield from u.read()
         self.assertIn('test_group', u.roles)
 
         # Unauthorized access is properly handled
         ua = auth.EtcdUser(self.unauth_client, 'test_user')
-        self.assertRaises(etcd.EtcdInsufficientPermissions, ua.write)
+        with raises(etcd.EtcdInsufficientPermissions):
+            yield from ua.write()
 
         # now let's test deletion
         du = auth.EtcdUser(self.client, 'user.does.not.exist')
-        self.assertRaises(etcd.EtcdKeyNotFound, du.delete)
+        with raises(etcd.EtcdKeyNotFound):
+            yield from du.delete()
 
         # Delete test_user
-        u.delete()
-        self.assertRaises(etcd.EtcdKeyNotFound, u.read)
+        yield from u.delete()
+        with raises(etcd.EtcdKeyNotFound):
+            yield from u.read()
         # Permissions are properly handled
-        self.assertRaises(etcd.EtcdInsufficientPermissions, ua.delete)
+        with raises(etcd.EtcdInsufficientPermissions):
+            yield from ua.delete()
 
 
 class EtcdRoleTest(TestEtcdAuthBase):
-    def test_names(self):
+    @helpers.run_async
+    def test_names(loop,self):
         r = auth.EtcdRole(self.client, 'guest')
-        self.assertListEqual(r.names, [u'guest', u'root'])
+        self.assertListEqual((yield from r.get_names()), [u'guest', u'root'])
 
-    def test_read(self):
+    @helpers.run_async
+    def test_read(loop,self):
         r = auth.EtcdRole(self.client, 'guest')
         try:
-            r.read()
+            yield from r.read()
         except:
             self.fail('Reading an existing role failed')
 
@@ -131,31 +151,35 @@ class EtcdRoleTest(TestEtcdAuthBase):
         # We can actually skip most other read tests as they are common
         # with EtcdUser
 
-    def test_write_and_delete(self):
+    @helpers.run_async
+    def test_write_and_delete(loop,self):
         r = auth.EtcdRole(self.client, 'test_role')
         r.acls = {'*': 'R', '/test/*': 'RW'}
         try:
-            r.write()
+            yield from r.write()
         except:
             self.fail("Writing a simple groups should not fail")
 
         r1 = auth.EtcdRole(self.client, 'test_role')
-        r1.read()
+        yield from r1.read()
         self.assertEquals(r1.acls, r.acls)
         r.revoke('/test/*', 'W')
-        r.write()
-        r1.read()
+        yield from r.write()
+        yield from r1.read()
         self.assertEquals(r1.acls, {'*': 'R', '/test/*': 'R'})
         r.grant('/pub/*', 'RW')
-        r.write()
-        r1.read()
+        yield from r.write()
+        yield from r1.read()
         self.assertEquals(r1.acls['/pub/*'], 'RW')
         # All other exceptions are tested by the user tests
         r1.name = None
-        self.assertRaises(etcd.EtcdException, r1.write)
+        with raises(etcd.EtcdException):
+            yield from r1.write()
         # ditto for delete
         try:
-            r.delete()
+            yield from r.delete()
         except:
             self.fail("A normal delete should not fail")
-        self.assertRaises(etcd.EtcdKeyNotFound, r.read)
+        with raises(etcd.EtcdKeyNotFound):
+            yield from r.read()
+

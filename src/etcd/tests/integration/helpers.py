@@ -14,12 +14,13 @@ from socket import socket
 def run_async(p):
     @wraps(p)
     def runner(*a,**k):
-        loop = asyncio.new_event_loop()
+        loop = asyncio.get_event_loop()
         try:
             f = asyncio.async(asyncio.coroutine(p)(loop, *a,**k), loop=loop)
             return loop.run_until_complete(asyncio.wait_for(f, timeout=300, loop=loop))
         finally:
-            loop.close()
+            pass
+            # loop.close()
     return runner
 
 class EtcdProcessHelper(object):

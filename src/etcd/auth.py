@@ -19,7 +19,7 @@ class EtcdAuthBase(object):
         key = "{}s".format(self.entity)
         uri = "{}/auth/{}".format(self.client.version_prefix, key)
         response = await self.client.api_execute(uri, self.client._MGET)
-        return json.loads(response.data.decode('utf-8'))[key]
+        return json.loads((await response.read()).decode('utf-8'))[key]
 
     async def read(self):
         try:
@@ -35,14 +35,14 @@ class EtcdAuthBase(object):
                        self.entity, self.client._base_uri,
                        self.client.version_prefix, e)
             raise etcd.EtcdException(
-                "Could not fetch {} '{}'".format(self.entity, self.name))
+                "Could not fetch {} '{}'".format(self.entity, self.name)) from e
 
-        self._from_net(response.data)
+        self._from_net((await response.read()))
 
     async def write(self):
         try:
             r = self.__class__(self.client, self.name)
-            r.read()
+            await r.read()
         except etcd.EtcdKeyNotFound:
             r = None
         try:
@@ -51,16 +51,17 @@ class EtcdAuthBase(object):
                                                         self.client._MPUT,
                                                         params=payload)
                 # This will fail if the response is an error
-                self._from_net(response.data)
+                self._from_net(await response.read())
         except etcd.EtcdInsufficientPermissions as e:
             _log.error("Any action on the authorization requires the root role")
             raise
         except Exception as e:
             _log.error("Failed to write %s '%s'", self.entity, self.name)
             # TODO: fine-grained exception handling
+            raise
             raise etcd.EtcdException(
                 "Could not write {} '{}': {}".format(self.entity,
-                                                     self.name, e))
+                                                     self.name, e)) from e
 
     async def delete(self):
         try:
@@ -75,7 +76,7 @@ class EtcdAuthBase(object):
             _log.error("Failed to delete %s in %s%s: %r",
                        self.entity, self._base_uri, self.version_prefix, e)
             raise etcd.EtcdException(
-                "Could not delete {} '{}'".format(self.entity, self.name))
+                "Could not delete {} '{}'".format(self.entity, self.name)) from e
 
     def _from_net(self, data):
         raise NotImplementedError()
@@ -198,16 +199,16 @@ class EtcdRole(EtcdAuthBase):
         return retval
 
     def grant(self, path, permission):
-        if permission.upper().find('R') >= 0:
+        if 'R' in permission:
             self._read_paths.add(path)
-        if permission.upper().find('W') >= 0:
+        if 'W' in permission:
             self._write_paths.add(path)
 
     def revoke(self, path, permission):
-        if permission.upper().find('R') >= 0 and \
+        if 'R' in permission and \
            path in self._read_paths:
             self._read_paths.remove(path)
-        if permission.upper().find('W') >= 0 and \
+        if 'W' in permission and \
            path in self._write_paths:
             self._write_paths.remove(path)
 
@@ -226,14 +227,12 @@ class EtcdRole(EtcdAuthBase):
             pass
         return perms
 
-    async def get_acls(self):
-        return self.acls
-
-    async def set_acls(self, acls):
+    @acls.setter
+    def acls(self, acls):
         self._read_paths = set()
         self._write_paths = set()
         for path, permission in acls.items():
-            await self.grant(path, permission)
+            self.grant(path, permission)
 
     def __str__(self):
         return json.dumps({"role": self.name, 'acls': self.acls})
@@ -246,9 +245,9 @@ class Auth(object):
 
     async def get_active(self):
         resp = await self.client.api_execute(self.uri, self.client._MGET)
-        return json.loads(resp.data.decode('utf-8'))['enabled']
+        return json.loads((await resp.read()).decode('utf-8'))['enabled']
 
     async def set_active(self, value):
-        if value != self.active:
+        if value != (await self.get_active()):
             method = value and self.client._MPUT or self.client._MDELETE
             await self.client.api_execute(self.uri, method)
