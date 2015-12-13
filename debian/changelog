@@ -1,3 +1,9 @@
+aio-etcd (0.4.3.2-1) unstable; urgency=medium
+
+  * Don't urllib3 me
+
+ -- Matthias Urlichs <matthias@urlichs.de>  Sun, 13 Dec 2015 04:07:30 +0100
+
 aio-etcd (0.4.3.1-2) unstable; urgency=medium
 
   * Fix package name in debian/rules
