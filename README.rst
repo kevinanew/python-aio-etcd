@@ -40,7 +40,7 @@ Create a client object
 
 .. code:: python
 
-    import etcd
+    import aio_etcd as etcd
 
     client = etcd.Client() # this will create a client against etcd server running on localhost on port 4001
     client = etcd.Client(port=4002)
