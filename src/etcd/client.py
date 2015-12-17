@@ -717,12 +717,12 @@ class Client(object):
         while True:
             response = await self.watch(key, index=local_index, recursive=recursive)
             local_index = response.modifiedIndex + 1
-            res = callback(response)
-            if isinstance(res, asyncio.Future) or asyncio.iscoroutine(res):
-                try:
+            try:
+                res = callback(response)
+                if isinstance(res, asyncio.Future) or asyncio.iscoroutine(res):
                     await res
-                except etcd.StopWatching:
-                    return local_index
+            except etcd.StopWatching:
+                return local_index
 
     def get_lock(self, *args, **kwargs):
         raise NotImplementedError('Lock primitives were removed from etcd 2.0')
