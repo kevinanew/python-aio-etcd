@@ -812,7 +812,10 @@ class Client(object):
                 except etcd.EtcdClusterIdChanged as e:
                     _log.warning(e)
                     raise
-                except:
+                except asyncio.CancelledError:
+                    # don't complain
+                    raise
+                except Exception:
                     _log.exception("Unexpected request failure, re-raising.")
                     raise
                 else:

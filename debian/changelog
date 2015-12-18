@@ -1,3 +1,9 @@
+aio-etcd (0.4.4-2) unstable; urgency=medium
+
+  * Don't complain about cancelling
+
+ -- Matthias Urlichs <matthias@urlichs.de>  Fri, 18 Dec 2015 08:01:38 +0100
+
 aio-etcd (0.4.4-1) unstable; urgency=medium
 
   * Allow a non-asyncio callback to raise StopWatching.
