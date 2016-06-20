@@ -147,14 +147,14 @@ class EtcdRoleTest(TestEtcdAuthBase):
         except:
             self.fail('Reading an existing role failed')
 
-        self.assertEquals(r.acls, {'*': 'RW'})
+        self.assertEquals(r.acls, {'/*': 'RW'})
         # We can actually skip most other read tests as they are common
         # with EtcdUser
 
     @helpers.run_async
     def test_write_and_delete(loop,self):
         r = auth.EtcdRole(self.client, 'test_role')
-        r.acls = {'*': 'R', '/test/*': 'RW'}
+        r.acls = {'/*': 'R', '/test/*': 'RW'}
         try:
             yield from r.write()
         except:
@@ -166,7 +166,7 @@ class EtcdRoleTest(TestEtcdAuthBase):
         r.revoke('/test/*', 'W')
         yield from r.write()
         yield from r1.read()
-        self.assertEquals(r1.acls, {'*': 'R', '/test/*': 'R'})
+        self.assertEquals(r1.acls, {'/*': 'R', '/test/*': 'R'})
         r.grant('/pub/*', 'RW')
         yield from r.write()
         yield from r1.read()
