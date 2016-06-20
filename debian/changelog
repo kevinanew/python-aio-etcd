@@ -1,3 +1,10 @@
+aio-etcd (0.4.4-3) unstable; urgency=medium
+
+  * Ignore past test failure
+  * fix ACL test
+
+ -- Matthias Urlichs <matthias@urlichs.de>  Mon, 20 Jun 2016 05:55:42 +0200
+
 aio-etcd (0.4.4-2) unstable; urgency=medium
 
   * Don't complain about cancelling
