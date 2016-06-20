@@ -17,3 +17,4 @@ docs
 *.swp
 /.pybuild
 /test.log
+/.cache/v/cache/lastfailed
