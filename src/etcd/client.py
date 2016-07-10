@@ -735,7 +735,7 @@ class Client(object):
         """ Creates an EtcdResult from json dictionary """
         raw_response = await response.read()
         try:
-            res = json.loads(raw_response.decode('utf-8'))
+            res = await response.json()
         except (TypeError, ValueError, UnicodeError) as e:
             raise etcd.EtcdException(
                 'Server response was not valid JSON: %r', raw_response)
