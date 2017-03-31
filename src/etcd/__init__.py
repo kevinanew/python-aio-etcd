@@ -3,7 +3,7 @@ from etcd import *
 from .client import Client
 from .lock import Lock
 
-__VERSION__ = (0,4,3,1)
+__VERSION__ = (0,4,5,0)
 
 _log = logging.getLogger(__name__)
 
