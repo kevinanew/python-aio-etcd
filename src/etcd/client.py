@@ -9,7 +9,11 @@
 import logging
 #from http.client import HTTPException
 from aiohttp.web_exceptions import HTTPException
-from aiohttp.errors import DisconnectedError,ClientConnectionError,ClientResponseError
+try:
+    from aiohttp.errors import DisconnectedError,ClientConnectionError,ClientResponseError
+except ImportError:
+    from aiohttp.client_exceptions import ServerDisconnectedError as DisconnectedError
+    from aiohttp.client_exceptions import ClientConnectionError,ClientResponseError
 from aiohttp.helpers import BasicAuth
 import socket
 import aiohttp
