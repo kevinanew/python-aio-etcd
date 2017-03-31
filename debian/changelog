@@ -1,3 +1,10 @@
+aio-etcd (0.4.5-1) unstable; urgency=medium
+
+  * Updated to upstream 0.4.5
+  * Added support for aiohttp 2.0
+
+ -- Matthias Urlichs <matthias@urlichs.de>  Fri, 31 Mar 2017 08:50:56 +0200
+
 aio-etcd (0.4.4-3) unstable; urgency=medium
 
   * Ignore past test failure
