@@ -13,6 +13,8 @@ from aiohttp.errors import DisconnectedError,ClientConnectionError,ClientRespons
 from aiohttp.helpers import BasicAuth
 import socket
 import aiohttp
+from urllib3.exceptions import HTTPError
+from urllib3.exceptions import ReadTimeoutError
 import json
 import ssl
 import dns.resolver
@@ -39,7 +41,7 @@ class Client(object):
     _MPUT = 'PUT'
     _MPOST = 'POST'
     _MDELETE = 'DELETE'
-    _comparison_conditions = set(('prevValue', 'prevIndex', 'prevExist'))
+    _comparison_conditions = set(('prevValue', 'prevIndex', 'prevExist', 'refresh'))
     _read_options = set(('recursive', 'wait', 'waitIndex', 'sorted', 'quorum'))
     _del_conditions = set(('prevValue', 'prevIndex'))
 
@@ -63,6 +65,7 @@ class Client(object):
             per_host_pool_size=10,
             ssl_verify=ssl.CERT_REQUIRED,
             loop=None,
+            lock_prefix="/_locks"
     ):
         """
         Initialize the client.
@@ -108,6 +111,8 @@ class Client(object):
             per_host_pool_size (int): specifies maximum number of connections to pool
                                       by host. By default this will use up to 10
                                       connections.
+            lock_prefix (str): Set the key prefix at etcd when client to lock object.
+                                      By default this will be use /_locks.
         """
 
         # If a DNS record is provided, use it to get the hosts list
@@ -140,10 +145,10 @@ class Client(object):
         self._allow_redirect = allow_redirect
         self._use_proxies = use_proxies
         self._allow_reconnect = allow_reconnect
+        self._lock_prefix = lock_prefix
 
         # SSL Client certificate support
         ssl_ctx = ssl.create_default_context()
-
         if protocol == 'https':
             # If we don't allow TLSv1, clients using older version of OpenSSL
             # (<1.0) won't be able to connect.
@@ -214,6 +219,23 @@ class Client(object):
         self._machines_cache = await self.machines()
         self._machines_available = True
 
+        # Versions set to None. They will be set upon first usage.
+        self._version = self._cluster_version = None
+
+    def _set_version_info(self):
+        """
+        Sets the version information provided by the server.
+        """
+        # Set the version
+        version_info = json.loads(self.http.request(
+            self._MGET,
+            self._base_uri + '/version',
+            headers=self._get_headers(),
+            timeout=self.read_timeout,
+            redirect=self.allow_redirect).data.decode('utf-8'))
+        self._version = version_info['etcdserver']
+        self._cluster_version = version_info['etcdcluster']
+
     def _discover(self, domain):
         srv_name = "_etcd._tcp.{}".format(domain)
         answers = dns.resolver.query(srv_name, 'SRV')
@@ -250,6 +272,11 @@ class Client(object):
     def allow_redirect(self):
         """Allow the client to connect to other nodes."""
         return self._allow_redirect
+
+    @property
+    def lock_prefix(self):
+        """Get the key prefix at etcd when client to lock object."""
+        return self._lock_prefix
 
     async def machines(self):
         """
@@ -295,8 +322,6 @@ class Client(object):
     async def members(self):
         """
         A more structured view of peers in the cluster.
-
-        Note that while we have an internal DS called _members, accessing the public property will call etcd.
         """
         # Empty the members list
         self._members = {}
@@ -361,6 +386,25 @@ class Client(object):
             raise etcd.EtcdException("Cannot parse json data in the response") from e
 
     @property
+    def version(self):
+        """
+        Version of etcd.
+        """
+        if not self._version:
+            self._set_version_info()
+        return self._version
+
+    @property
+    def cluster_version(self):
+        """
+        Version of the etcd cluster.
+        """
+        if not self._cluster_version:
+            self._set_version_info()
+
+        return self._cluster_version
+
+    @property
     def key_endpoint(self):
         """
         REST key endpoint.
@@ -385,10 +429,9 @@ class Client(object):
             key = "/{}".format(key)
         return key
 
-
     async def write(self, key, value, ttl=None, dir=False, append=False, **kwdargs):
         """
-        Writes the value for a key, possibly doing atomit Compare-and-Swap
+        Writes the value for a key, possibly doing atomic Compare-and-Swap
 
         Args:
             key (str):  Key.
@@ -409,6 +452,8 @@ class Client(object):
             prevIndex (int): modify key only if actual modifiedIndex matches the provided one (optional).
 
             prevExist (bool): If false, only create key; if true, only update key.
+
+            refresh (bool): since 2.3.0, If true, only update the ttl, prev key must existed(prevExist=True).
 
         Returns:
             client.EtcdResult
@@ -448,6 +493,28 @@ class Client(object):
 
         response = await self.api_execute(path, method, params=params)
         return (await self._result_from_response(response))
+
+    def refresh(self, key, ttl, **kwdargs):
+        """
+        (Since 2.3.0) Refresh the ttl of a key without notifying watchers.
+
+        Keys in etcd can be refreshed without notifying watchers,
+        this can be achieved by setting the refresh to true when updating a TTL
+
+        You cannot update the value of a key when refreshing it
+
+        @see: https://github.com/coreos/etcd/blob/release-2.3/Documentation/api.md#refreshing-key-ttl
+
+        Args:
+            key (str):  Key.
+
+            ttl (int):  Time in seconds of expiration (optional).
+
+            Other parameters modifying the write method are accepted as `EtcdClient.write`.
+        """
+        # overwrite kwdargs' prevExist
+        kwdargs['prevExist'] = True
+        return self.write(key=key, value=None, ttl=ttl, refresh=True, **kwdargs)
 
     def update(self, obj):
         """
@@ -679,7 +746,7 @@ class Client(object):
             A coroutine returning client.EtcdResult
 
         Raises:
-            KeyValue:  If the key doesn't exists.
+            KeyValue:  If the key doesn't exist.
 
         >>> print client.watch('/key').value
         'value'
@@ -776,6 +843,7 @@ class Client(object):
                 await self._update_machines()
 
             while not response:
+                some_request_failed = False
                 try:
                     response = await payload(self, path, method, params=params)
                     # Check the cluster ID hasn't changed under us.  We use
@@ -789,6 +857,14 @@ class Client(object):
                     # urllib3 doesn't wrap all httplib exceptions and earlier versions
                     # don't wrap socket errors either.
                 except (ClientResponseError, DisconnectedError, HTTPException, socket.error) as e:
+                    if (isinstance(params, dict) and
+                        params.get("wait") == "true" and
+                        isinstance(e, ReadTimeoutError)):
+                        _log.debug("Watch timed out.")
+                        raise etcd.EtcdWatchTimedOut(
+                            "Watch timed out: %r" % e,
+                            cause=e
+                        )
                     _log.error("Request to server %s failed: %r",
                                self._base_uri, e)
                     if self._allow_reconnect:

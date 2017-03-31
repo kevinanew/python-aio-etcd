@@ -1,7 +1,7 @@
 import json
 
 import logging
-import etcd
+import aio_etcd as etcd
 
 _log = logging.getLogger(__name__)
 
@@ -19,7 +19,9 @@ class EtcdAuthBase(object):
         key = "{}s".format(self.entity)
         uri = "{}/auth/{}".format(self.client.version_prefix, key)
         response = await self.client.api_execute(uri, self.client._MGET)
-        return json.loads((await response.read()).decode('utf-8'))[key]
+        res = json.loads((await response.read()).decode('utf-8'))[key]
+        res = list(x[self.entity] if isinstance(x,dict) else x for x in res)
+        return res
 
     async def read(self):
         try:
@@ -102,7 +104,9 @@ class EtcdUser(EtcdAuthBase):
 
     def _from_net(self, data):
         d = json.loads(data.decode('utf-8'))
-        self.roles = d.get('roles', [])
+        r = d.get('roles', [])
+        r = list(k['role'] if isinstance(k,dict) else k for k in r)
+        self.roles = r
         self.name = d.get('user')
 
     def _to_net(self, prevobj=None):

@@ -17,7 +17,7 @@ Installation
 Pre-requirements
 ~~~~~~~~~~~~~~~~
 
-Install etcd (2.0.1 or later). This version of python-aio-etcd will only work correctly with the version 2.0.x or later.
+This version of python-etcd will only work correctly with the etcd server version 2.0.x or later. If you are running an older version of etcd, please use python-etcd 0.3.3 or earlier.
 
 This client is known to work with python 3.5. It will not work in older versions of python due to ist use of "async def" syntax.
 
@@ -45,9 +45,8 @@ Create a client object
     client = etcd.Client() # this will create a client against etcd server running on localhost on port 4001
     client = etcd.Client(port=4002)
     client = etcd.Client(host='127.0.0.1', port=4003)
-    client = etcd.Client(host='127.0.0.1', port=4003, allow_redirect=False)
-    # wont let you run sensitive commands on non-leader machines, default is true
-
+    client = etcd.Client(host=(('127.0.0.1', 4001), ('127.0.0.1', 4002), ('127.0.0.1', 4003)))
+    client = etcd.Client(host='127.0.0.1', port=4003, allow_redirect=False) # wont let you run sensitive commands on non-leader machines, default is true
     # If you have defined a SRV record for _etcd._tcp.example.com pointing to the clients
     client = etcd.Client(srv_domain='example.com', protocol="https")
 
@@ -55,7 +54,7 @@ Create a client object
     client = etcd.Client(host='api.example.com', protocol='https', port=443, version_prefix='/etcd')
 
 Write a key
-~~~~~~~~~
+~~~~~~~~~~~
 
 .. code:: python
 
@@ -69,7 +68,7 @@ Write a key
     # sets the ttl to 4 seconds
 
 Read a key
-~~~~~~~~~
+~~~~~~~~~~
 
 .. code:: python
 
@@ -82,6 +81,14 @@ Read a key
     await client.read('/nodes', recursive = True)
     # get all the values of a directory, recursively.
 
+    # raises etcd.EtcdKeyNotFound when key not found
+    try:
+        client.read('/invalid/path')
+    except etcd.EtcdKeyNotFound:
+        # do something
+        print "error"
+
+
 Delete a key
 ~~~~~~~~~~~~
 
@@ -90,7 +97,7 @@ Delete a key
     await client.delete('/nodes/n1')
 
 Atomic Compare and Swap
-~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code:: python
 
@@ -144,6 +151,20 @@ If you want to time out the read() call, wrap it in `asyncio.wait_for`:
 
     result = await asyncio.wait_for(client.read('/nodes/n1', wait=True), timeout=30)
 
+Refreshing key TTL
+~~~~~~~~~~~~~~~~~~
+
+(Since etcd 2.3.0) Keys in etcd can be refreshed without notifying current watchers.
+
+This can be achieved by setting the refresh to true when updating a TTL.
+
+You cannot update the value of a key when refreshing it.
+
+.. code:: python
+
+    client.write('/nodes/n1', 'value', ttl=30)  # sets the ttl to 30 seconds
+    client.refresh('/nodes/n1', ttl=600)  # refresh ttl to 600 seconds, without notifying current watchers
+
 Locking module
 ~~~~~~~~~~~~~~
 
@@ -153,27 +174,24 @@ Locking module
     # NOTE: this does not acquire a lock
     from aio_etcd.lock import Lock
     client = etcd.Client()
-    lock = Lock(client, 'my_lock_name')
+    # Or you can custom lock prefix, default is '/_locks/' if you are using HEAD
+    client = etcd.Client(lock_prefix='/my_etcd_root/_locks')
+    lock = etcd.Lock(client, 'my_lock_name')
 
     # Use the lock object:
-    await lock.acquire(blocking=True, lock_ttl=None)
-    # will block until the lock is acquired
-    # lock will live until we release it
-
-    await lock.is_acquired()
-    # returns True
-    # NOTE: This tells you that _somebody_ has the lock
-    await lock.acquire(lock_ttl=60)
-    # renew a lock
+    await lock.acquire(blocking=True, # will block until the lock is acquired
+          lock_ttl=None) # lock will live until we release it
+    lock.is_acquired  # True
+    await lock.acquire(lock_ttl=60) # renew a lock
     await lock.release() # release an existing lock
-    await lock.is_acquired()  # False
+    lock.is_acquired  # False
 
     # The lock object may also be used as a context manager:
     async with Lock(client, 'customer1') as my_lock:
         do_stuff()
-        await my_lock.is_acquired() # True
-        await my_lock.acquire(lock_ttl = 60) # renew
-    await my_lock.is_acquired() # probably False
+        my_lock.is_acquired  # True
+        await my_lock.acquire(lock_ttl=60)
+    my_lock.is_acquired  # False
 
 
 Get machines in the cluster
@@ -191,7 +209,7 @@ Get leader of the cluster
     leaderinfo = await client.leader()
 
 Generate a sequential key in a directory
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code:: python
 

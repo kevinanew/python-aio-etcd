@@ -1,5 +1,34 @@
 News
 ====
+0.4.5
+-----
+*Release date: 3-Mar-2017*
+
+* Remove dnspython2/3 requirement
+* Change property name setter in lock
+* Fixed acl tests
+* Added version/cluster_version properties to client
+* Fixes in lock when used as context manager
+* Fixed improper usage of urllib3 exceptions
+* Minor fixes for error classes
+* In lock return modifiedIndex to watch changes
+* In lock fix context manager exception handling
+* Improvments to the documentation
+* Remove _base_uri only after refresh from cluster
+* Avoid double update of _machines_cache
+
+
+0.4.4
+-----
+*Release date: 10-Jan-2017*
+
+* Fix some tests
+* Use sys,version_info tuple, instead of named tuple
+* Improve & fix documentation
+* Fix python3 specific problem when blocking on contented lock
+* Add refresh key method
+* Add custom lock prefix support
+
 
 -----------
 aio version
@@ -27,8 +56,9 @@ Upstream version
 
 0.4.3
 -----
-*Release date: 3-Dec-2015*
+*Release date: 14-Dec-2015*
 
+* Fix check for parameters in case of connection error
 * Python 3.5 compatibility and general python3 cleanups
 * Added authentication and module for managing ACLs
 * Added srv record-based DNS discovery

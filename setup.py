@@ -13,10 +13,13 @@ def get_version(fname='aio_etcd/__init__.py'):
             if line.startswith('__VERSION__'):
                 return eval(line.split('=')[-1])
 
+version = '0.4.3'
+
 install_requires = [
     'python-etcd',
     'aiohttp',
     'dnspython3',
+    'urllib3>=1.7.1',
 ]
 
 test_requires = [

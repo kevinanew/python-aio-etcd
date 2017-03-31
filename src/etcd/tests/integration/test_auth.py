@@ -80,6 +80,13 @@ class EtcdUserTest(TestEtcdAuthBase):
 
     @helpers.run_async
     def test_write_and_delete(loop,self):
+        r = auth.EtcdRole(self.client, 'test_group')
+        r.acls = {'/*': 'R', '/test/*': 'RW'}
+        try:
+            yield from r.write()
+        except:
+            self.fail("Writing a simple groups should not fail")
+
         # Create an user
         u = auth.EtcdUser(self.client, 'test_user')
         u.roles.add('guest')
@@ -147,7 +154,13 @@ class EtcdRoleTest(TestEtcdAuthBase):
         except:
             self.fail('Reading an existing role failed')
 
-        self.assertEquals(r.acls, {'/*': 'RW'})
+        # XXX The ACL path result changed from '*' to '/*' at some point
+        #     between etcd-2.2.2 and 2.2.5.  They're equivalent so allow
+        #     for both.
+        if '/*' in r.acls:
+            self.assertEquals(r.acls, {'/*': 'RW'})
+        else:
+            self.assertEquals(r.acls, {'*': 'RW'})
         # We can actually skip most other read tests as they are common
         # with EtcdUser
 

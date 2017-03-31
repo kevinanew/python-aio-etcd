@@ -57,7 +57,7 @@ Set a key
     await client.write('/nodes/n3', 'test2', prevValue='test1') #this fails to write
     await client.write('/nodes/n3', 'test2', prevIndex=10) #this fails to write
     # mkdir
-    await client.write('/nodes/queue', dir=True)
+    await client.write('/nodes/queue', None, dir=True)
     # Append a value to a queue dir
     await client.write('/nodes/queue', 'test', append=True) #will write i.e. /nodes/queue/11
     await client.write('/nodes/queue', 'test2', append=True) #will write i.e. /nodes/queue/12
@@ -88,6 +88,12 @@ Get a key
     await client.read('/nodes/n2', wait=True) #Waits for a change in value in the key before returning.
     await client.read('/nodes/n2', wait=True, waitIndex=10)
 
+    # raises etcd.EtcdKeyNotFound when key not found
+    try:
+        client.read('/invalid/path')
+    except etcd.EtcdKeyNotFound:
+        # do something
+        print "error"
 
 
 Delete a key
@@ -99,36 +105,33 @@ Delete a key
     await client.delete('/nodes', dir=True) #spits an error if dir is not empty
     await client.delete('/nodes', recursive=True) #this works recursively
 
+Locking module
+~~~~~~~~~~~~~~
 
-
-
-Use lock primitives
-...................
-
-.. code-block:: python
+.. code:: python
 
     # Initialize the lock object:
     # NOTE: this does not acquire a lock yet
     from aio_etcd.lock import Lock
     client = etcd.Client()
-    lock = Lock(client, '/customer1')
+    lock = etcd.Lock(client, 'my_lock_name')
 
     # Use the lock object:
-    await lock.acquire(lock_ttl=60)
-    state = await lock.is_locked()  # True
-    await lock.renew(60)
-    await lock.release()
-    state = await lock.is_locked()  # False
+    await lock.acquire(blocking=True, # will block until the lock is acquired
+          lock_ttl=None)  # lock will live until we release it
+    lock.is_acquired  # True
+    await lock.acquire(lock_ttl=60)  # renew a lock
+    await lock.release()  # release an existing lock
+    lock.is_acquired  # False
 
     # The lock object may also be used as a context manager:
     # (Python 3.5+)
     client = etcd.Client()
-    lock = Lock(client, '/customer1')
-    async with lock as my_lock:
+    async with etcd.Lock(client, 'customer1') as my_lock:
         do_stuff()
-        state = await lock.is_locked()  # True
-        await lock.renew(60)
-    state = await lock.is_locked()  # False
+        my_lock.is_acquired  # True
+        await my_lock.acquire(lock_ttl=60)
+    my_lock.is_acquired  # False
 
 
 Get machines in the cluster

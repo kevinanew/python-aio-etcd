@@ -18,7 +18,7 @@ class Lock(object):
         # prevent us from getting back the full path name. We prefix our
         # lock name with a uuid and can check for its presence on retry.
         self._uuid = uuid.uuid4().hex
-        self.path = "/_locks/{}".format(lock_name)
+        self.path = "{}/{}".format(client.lock_prefix, lock_name) 
         self.is_taken = False
         self._sequence = None
         _log.debug("Initiating lock for %s with uuid %s", self.path, self._uuid)
@@ -94,9 +94,12 @@ class Lock(object):
         You can use the lock as a contextmanager
         """
         await self.acquire(blocking=True, lock_ttl=0)
+        self.acquire(blocking=True, lock_ttl=None)
+        return self
 
     async def __aexit__(self, type, value, traceback):
         await self.release()
+        return False
 
     async def _acquired(self, blocking=True):
         locker, nearest = await self._get_locker()
@@ -111,19 +114,20 @@ class Lock(object):
             if not blocking:
                 return False
             # Let's look for the lock
-            watch_key = nearest
+            watch_key = nearest.key
             _log.debug("Lock not acquired, now watching %s", watch_key)
             while True:
                 try:
-                    r = await self.client.watch(watch_key)
+                    r = await self.client.watch(watch_key, index=nearest.modifiedIndex + 1)
                     _log.debug("Detected variation for %s: %s", r.key, r.action)
                     return (await self._acquired(blocking=True))
                 except aio_etcd.EtcdKeyNotFound:
                     _log.debug("Key %s not present anymore, moving on", watch_key)
                     return (await self._acquired(blocking=True))
-                except aio_etcd.EtcdException:
-                    # TODO: log something...
-                    pass
+                except etcd.EtcdLockExpired as e:
+                    raise e
+                except etcd.EtcdException:
+                    _log.exception("Unexpected exception")
 
     @property
     def lock_key(self):
@@ -166,7 +170,7 @@ class Lock(object):
                 return (l[0], None)
             else:
                 _log.debug("Locker: %s, key to watch: %s", l[0], l[i-1])
-                return (l[0], l[i-1])
+                return (l[0], next(x for x in results if x.key == l[i-1]))
         except ValueError as exc:
             # Something very wrong is going on, most probably
             # our lock has expired
