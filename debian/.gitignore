@@ -4,3 +4,4 @@
 /*.substvars
 /python3-aio-etcd
 /python-aio-etcd-doc
+/debhelper-build-stamp
