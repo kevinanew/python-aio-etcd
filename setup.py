@@ -35,18 +35,6 @@ class PyTest(TestCommand):
         TestCommand.initialize_options(self)
         self.pytest_args = ['--assert=plain','tests/']
 
-#    def finalize_options(self):
-#        TestCommand.finalize_options(self)
-#        self.test_args = []
-#        self.test_suite = True
-
-    def run_tests(self):
-        #import here, cause outside the eggs aren't loaded
-        import pytest
-        errno = pytest.main(self.pytest_args)
-        os.unlink("test.log") ## GAAH
-        sys.exit(errno)
-
 setup(
     name='aio_etcd',
     version='.'.join(str(x) for x in get_version()),

@@ -312,7 +312,8 @@ class Client(object):
                         ]
                         _log.debug("Retrieved list of machines: %s", machines)
                         return machines
-                except (HTTPException, socket.error, DisconnectedError, ClientConnectionError) as e:
+                except (HTTPException, socket.error, DisconnectedError,
+                        ClientConnectionError, asyncio.TimeoutError) as e:
                     # We can't get the list of machines, if one server is in the
                     # machines cache, try on it
                     _log.error("Failed to get list of machines from %s%s: %r",
@@ -323,14 +324,14 @@ class Client(object):
                                     "maybe you provided the wrong "
                                     "host(s) to connect to?")
 
-    async def members(self):
+    async def members(self, **kw):
         """
         A more structured view of peers in the cluster.
         """
         # Empty the members list
         self._members = {}
         try:
-            response = await self.api_execute(self.version_prefix + '/members', self._MGET)
+            response = await self.api_execute(self.version_prefix + '/members', self._MGET, **kw)
             data = await response.read()
             res = json.loads(data.decode('utf-8'))
             for member in res['members']:
@@ -339,7 +340,7 @@ class Client(object):
         except Exception as e:
             raise etcd.EtcdException("Could not get the members list, maybe the cluster has gone away?") from e
 
-    async def leader(self):
+    async def leader(self, **kw):
         """
         Returns:
             dict. the leader of the cluster.
@@ -348,7 +349,7 @@ class Client(object):
         {"id":"ce2a822cea30bfca","name":"default","peerURLs":["http://localhost:2380","http://localhost:7001"],"clientURLs":["http://127.0.0.1:4001"]}
         """
         try:
-            response = await self.api_execute(self.version_prefix + '/stats/self', self._MGET)
+            response = await self.api_execute(self.version_prefix + '/stats/self', self._MGET, **kw)
             data = await response.read()
             leader = json.loads(data.decode('utf-8'))
             return (await self.members())[leader['leaderInfo']['leader']]
@@ -482,12 +483,15 @@ class Client(object):
                     'Cannot create a directory with a value')
             params['dir'] = "true"
 
+        kw = {}
         for (k, v) in kwdargs.items():
             if k in self._comparison_conditions:
                 if type(v) == bool:
                     params[k] = v and "true" or "false"
                 else:
                     params[k] = v
+            else:
+                kw[k] = v
 
         method = append and self._MPOST or self._MPUT
         if '_endpoint' in kwdargs:
@@ -495,7 +499,7 @@ class Client(object):
         else:
             path = self.key_endpoint + key
 
-        response = await self.api_execute(path, method, params=params)
+        response = await self.api_execute(path, method, params=params, **kw)
         return (await self._result_from_response(response))
 
     def refresh(self, key, ttl, **kwdargs):
@@ -520,7 +524,7 @@ class Client(object):
         kwdargs['prevExist'] = True
         return self.write(key=key, value=None, ttl=ttl, refresh=True, **kwdargs)
 
-    def update(self, obj):
+    def update(self, obj, **kwdargs):
         """
         Updates the value for a key atomically. Typical usage would be:
 
@@ -535,11 +539,9 @@ class Client(object):
         This method returns a coroutine.
         """
         _log.debug("Updating %s to %s.", obj.key, obj.value)
-        kwdargs = {
-            'dir': obj.dir,
-            'ttl': obj.ttl,
-            'prevExist': True
-            }
+        kwdargs['dir'] = obj.dir
+        kwdargs['ttl'] = obj.ttl
+        kwdargs['prevExist'] = True
 
         if not obj.dir:
             # prevIndex on a dir causes a 'not a file' error. d'oh!
@@ -578,15 +580,18 @@ class Client(object):
         key = self._sanitize_key(key)
 
         params = {}
+        kw = {}
         for (k, v) in kwdargs.items():
             if k in self._read_options:
                 if type(v) == bool:
                     params[k] = v and "true" or "false"
                 elif v is not None:
                     params[k] = v
+            else:
+                kw[k] = v
 
         response = await self.api_execute(
-            self.key_endpoint + key, self._MGET, params=params)
+            self.key_endpoint + key, self._MGET, params=params, **kw)
         return (await self._result_from_response(response))
 
     async def delete(self, key, recursive=None, dir=None, **kwdargs):
@@ -622,19 +627,19 @@ class Client(object):
                    key, recursive, dir, kwdargs)
         key = self._sanitize_key(key)
 
-        kwds = {}
+        params = {}
         if recursive is not None:
-            kwds['recursive'] = recursive and "true" or "false"
+            params['recursive'] = recursive and "true" or "false"
         if dir is not None:
-            kwds['dir'] = dir and "true" or "false"
+            params['dir'] = dir and "true" or "false"
 
         for k in self._del_conditions:
             if k in kwdargs:
-                kwds[k] = kwdargs[k]
-        _log.debug("Calculated params = %s", kwds)
+                params[k] = kwdargs.pop(k)
+        _log.debug("Calculated params = %s", params)
 
         response = await self.api_execute(
-            self.key_endpoint + key, self._MDELETE, params=kwds)
+            self.key_endpoint + key, self._MDELETE, params=params, **kwdargs)
         return (await self._result_from_response(response))
 
     def pop(self, key, recursive=None, dir=None, **kwdargs):
@@ -670,7 +675,7 @@ class Client(object):
     pop._is_coroutine = True
 
     # Higher-level methods on top of the basic primitives
-    def test_and_set(self, key, value, prev_value, ttl=None):
+    def test_and_set(self, key, value, prev_value, ttl=None, **kwdargs):
         """
         Atomic test & set operation.
         It will check if the value of 'key' is 'prev_value',
@@ -693,10 +698,10 @@ class Client(object):
         'new'
 
         """
-        return self.write(key, value, prevValue=prev_value, ttl=ttl)
+        return self.write(key, value, prevValue=prev_value, ttl=ttl, **kwdargs)
     test_and_set._is_coroutine = True
 
-    def set(self, key, value, ttl=None):
+    def set(self, key, value, ttl=None, **kwdargs):
         """
         Compatibility: sets the value of the key 'key' to the value 'value'
 
@@ -712,10 +717,10 @@ class Client(object):
            etcd.EtcdException: when something weird goes wrong.
 
         """
-        return self.write(key, value, ttl=ttl)
+        return self.write(key, value, ttl=ttl, **kwdargs)
     set._is_coroutine = True
 
-    def get(self, key):
+    def get(self, key, **kwdargs):
         """
         Returns the value of the key 'key'.
 
@@ -732,7 +737,7 @@ class Client(object):
         'value'
 
         """
-        return self.read(key)
+        return self.read(key, **kwdargs)
     get._is_coroutine = True
 
     async def watch(self, key, index=None, recursive=None):
@@ -743,8 +748,6 @@ class Client(object):
             key (str):  Key.
 
             index (int): Index to start from.
-
-            timeout (int):  max seconds to wait for a read.
 
         Returns:
             A coroutine returning client.EtcdResult
@@ -758,9 +761,9 @@ class Client(object):
         """
         _log.debug("Wait %s on %s", index, key)
         if index:
-            res = await self.read(key, wait=True, waitIndex=index, recursive=recursive)
+            res = await self.read(key, wait=True, waitIndex=index, recursive=recursive, timeout=None)
         else:
-            res = await self.read(key, wait=True, recursive=recursive)
+            res = await self.read(key, wait=True, recursive=recursive, timeout=None)
         _log.debug("Wait %s on %s done: %s",index, key, res)
         return res
 
@@ -836,7 +839,7 @@ class Client(object):
 
     def _wrap_request(payload):
         @wraps(payload)
-        async def wrapper(self, path, method, params=None):
+        async def wrapper(self, path, method, params=None, **kw):
             some_request_failed = False
             response = False
 
@@ -849,7 +852,7 @@ class Client(object):
             while not response:
                 some_request_failed = False
                 try:
-                    response = await payload(self, path, method, params=params)
+                    response = await payload(self, path, method, params=params, **kw)
                     # Check the cluster ID hasn't changed under us.  We use
                     # preload_content=False above so we can read the headers
                     # before we wait for the content of a watch.
@@ -860,7 +863,8 @@ class Client(object):
                     _ = await response.read()
                     # urllib3 doesn't wrap all httplib exceptions and earlier versions
                     # don't wrap socket errors either.
-                except (ClientResponseError, DisconnectedError, HTTPException, socket.error) as e:
+                except (ClientResponseError, DisconnectedError, HTTPException,
+                        socket.error, asyncio.TimeoutError) as e:
                     if (isinstance(params, dict) and
                         params.get("wait") == "true" and
                         isinstance(e, ReadTimeoutError)):
@@ -918,7 +922,7 @@ class Client(object):
         return wrapper
 
     @_wrap_request
-    def api_execute(self, path, method, params=None):
+    def api_execute(self, path, method, params=None, **kw):
         """ Executes the query. """
 
         if not path.startswith('/'):
@@ -933,6 +937,7 @@ class Client(object):
                 params=params,
                 auth=self._get_auth(),
                 allow_redirects=self.allow_redirect,
+                **kw
                 )
 
         elif (method == self._MPUT) or (method == self._MPOST):
@@ -942,13 +947,14 @@ class Client(object):
                 data=params,
                 auth=self._get_auth(),
                 allow_redirects=self.allow_redirect,
+                **kw
                 )
         else:
             raise etcd.EtcdException(
                 'HTTP method {} not supported'.format(method))
 
     @_wrap_request
-    def api_execute_json(self, path, method, params=None):
+    def api_execute_json(self, path, method, params=None, **kw):
         url = self._base_uri + path
         json_payload = json.dumps(params)
         headers = { 'Content-Type': 'application/json' }
@@ -957,7 +963,8 @@ class Client(object):
                                     data=json_payload,
                                     allow_redirects=self.allow_redirect,
                                     auth=self._get_auth(),
-                                    headers=headers)
+                                    headers=headers,
+                                    **kw)
 
     def _check_cluster_id(self, response):
         cluster_id = response.headers.get("x-etcd-cluster-id", None)
