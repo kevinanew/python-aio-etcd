@@ -852,6 +852,8 @@ class Client(object):
             while not response:
                 some_request_failed = False
                 try:
+                    if self._client is None:
+                        raise DisconnectedError
                     response = await payload(self, path, method, params=params, **kw)
                     # Check the cluster ID hasn't changed under us.  We use
                     # preload_content=False above so we can read the headers

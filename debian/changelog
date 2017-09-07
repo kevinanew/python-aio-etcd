@@ -1,3 +1,10 @@
+aio-etcd (0.4.6-2) unstable; urgency=medium
+
+  * Raise DisconnectedError if no connection
+  * Version update
+
+ -- Matthias Urlichs <matthias@urlichs.de>  Thu, 07 Sep 2017 14:57:49 +0200
+
 aio-etcd (0.4.6-1) unstable; urgency=medium
 
   * Tell aiohttp not to time out.
