@@ -215,9 +215,13 @@ class Client(object):
 
     def close(self):
         """Explicitly release the etcd connection(s)."""
-        if self._client is not None:
-            self._client.close()
-            self._client = None
+        if self._client is None:
+            return
+        if not self._client.closed:
+            if self._client._connector_owner:
+                self._client._connector.close()
+            self._client._connector = None
+        self._client = None
 
     async def _update_machines(self):
         self._machines_cache = await self.machines()
