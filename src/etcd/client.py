@@ -13,8 +13,10 @@ try:
     from aiohttp.errors import DisconnectedError,ClientConnectionError,ClientResponseError
 except ImportError:
     from aiohttp.client_exceptions import ServerDisconnectedError as DisconnectedError
-    from aiohttp.client_exceptions import ClientConnectionError,ClientResponseError
+    from aiohttp.client_exceptions import ClientConnectionError,ClientResponseError,ClientPayloadError
 from aiohttp.helpers import BasicAuth
+
+
 import socket
 import aiohttp
 from urllib3.exceptions import HTTPError
@@ -864,7 +866,7 @@ class Client(object):
                     # urllib3 doesn't wrap all httplib exceptions and earlier versions
                     # don't wrap socket errors either.
                 except (ClientResponseError, DisconnectedError, HTTPException,
-                        socket.error, asyncio.TimeoutError) as e:
+                        socket.error, asyncio.TimeoutError, ClientPayloadError) as e:
                     if (isinstance(params, dict) and
                         params.get("wait") == "true" and
                         isinstance(e, ReadTimeoutError)):
