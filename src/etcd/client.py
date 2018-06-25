@@ -217,7 +217,7 @@ class Client(object):
 
     def close(self):
         """Explicitly release the etcd connection(s)."""
-        client, self._client = self.client, None
+        client, self._client = self._client, None
         if client is not None:
            asyncio.run_coroutine_threadsafe(client.close(), self._loop)
 
