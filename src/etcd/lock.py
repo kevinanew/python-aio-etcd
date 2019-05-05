@@ -123,9 +123,9 @@ class Lock(object):
                 except aio_etcd.EtcdKeyNotFound:
                     _log.debug("Key %s not present anymore, moving on", watch_key)
                     return (await self._acquired(blocking=True))
-                except etcd.EtcdLockExpired as e:
+                except aio_etcd.EtcdLockExpired as e:
                     raise e
-                except etcd.EtcdException:
+                except aio_etcd.EtcdException:
                     _log.exception("Unexpected exception")
 
     @property
