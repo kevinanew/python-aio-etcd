@@ -94,7 +94,6 @@ class Lock(object):
         You can use the lock as a contextmanager
         """
         await self.acquire(blocking=True, lock_ttl=0)
-        self.acquire(blocking=True, lock_ttl=None)
         return self
 
     async def __aexit__(self, type, value, traceback):
